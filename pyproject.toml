@@ -28,9 +28,15 @@ classifiers = ["Programming Language :: Python :: 3", "Topic :: Multimedia :: Gr
 [project.urls]
 Homepage = "https://github.com/drkostas/3d-card"
 
+[project.scripts]
+3d-card = "card3d.cli:main"
+
 [project.optional-dependencies]
 sim = ["mujoco>=3.0", "coacd>=1.0"]
 test = ["pytest>=8"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+card3d = ["skill/SKILL.md"]

@@ -70,6 +70,14 @@ If you list your joints in the source as `{"type": "peg", "size": 3.0, "axis": (
 - `card3d.simulator` reports overhangs and where supports would leave marks, sweeps a peg into its socket to find collisions, finds the best print orientation, and with the `sim` extra decomposes a part into convex pieces and tests in MuJoCo whether the assembled model stands.
 - `card3d.labels` makes small 3D numbers for parts and cards.
 
+## Claude Code skill
+
+```bash
+3d-card skill             # copies it to ~/.claude/skills/3d-card
+```
+
+The skill gives Claude the whole procedure we used, in order. It starts with measuring clearances on your printer and goes through joints, building the card, reading its notes and the round trip, and checking the slice, up to the first physical print. It ends with a table of the failures we met (a card that printed as spaghetti, gates that cut a joint, parts that stayed on the frame) with how to check and fix each one.
+
 ## Limits
 
 - It was built for one toy with about twenty parts. Cards with many more parts work, but the layout is a row packer, not an optimiser.

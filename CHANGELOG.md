@@ -10,3 +10,4 @@ First release.
 - `joints` for pegs, axles, pivots, ball joints, tabs and cross laps, with test-print coupons
 - `simulator` for overhangs, insertion sweeps, print orientation and a MuJoCo stand-up test
 - `labels` for small 3D numbers
+- A Claude Code skill, installed with `3d-card skill`
