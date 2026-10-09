@@ -1,10 +1,10 @@
+![3d-card](docs/images/banner.png)
+
 # 3d-card
 
 3d-card turns a set of 3D-printable parts into one printable card, like the sprue of a plastic model kit. The parts sit on a flat frame, each held by small gates at the bottom, and you print the whole card in one go, cut the parts off and put them together. Before it gives you the card, it cuts every gate itself and checks that every part comes back whole and loose (the round trip).
 
 I wrote it for a posable toy figure I designed and printed, and I could not find a public tool that makes this kind of card. It also has the print-in-place joints and the printability checks I needed on the way.
-
-![A made-up kit of a block, a rod on a peg and two wheels, laid out on one card](docs/example.png)
 
 ## Install
 
