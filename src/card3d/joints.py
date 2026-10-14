@@ -123,6 +123,7 @@ BALL_NECK = 0.34          # neck diameter, and its length, as a fraction of the 
 BALL_WALL = 1.00          # material left around the cavity, so the socket has something to spring
 BALL_SLITS = 4            # relief cuts through the mouth
 BALL_SLIT_W = 0.55        # each slit's width, wider than a nozzle so the slicer draws it
+BALL_LEAD = 0.05          # how much wider than the cavity the lead-in below the rim is, per side
 
 
 def ball_reach(size):
@@ -263,13 +264,25 @@ def female(kind, size, axis, at, length=None, slit_phase=0.0):
         cav.apply_translation([0, 0, c])
         mouth_r = math.sqrt(max((R + gap) ** 2 - depth ** 2, 1e-9))    # the rim, and the retention
 
-        # The neck needs room to swing, or the joint has two degrees of freedom on paper and none in
-        # practice. Below the rim the cut opens into a cone. That is the volume the neck sweeps as
-        # the part is twisted, and it also works as a lead-in that guides the ball to the rim
-        # during assembly.
-        swing = trimesh.creation.cone(radius=R * 1.35, height=(c + R))
-        swing.apply_transform(trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0]))
-        swing.apply_translation([0, 0, c - depth])
+        # The ball has to reach the rim before the rim can grip it, and the neck needs room to swing
+        # once it is in. So below the rim the cut is a lead-in: a short 45 degree chamfer from the
+        # rim out to a channel a little wider than the ball, which runs out past the joint point.
+        # Pushed in along the axis, the ball then meets only the rim, where the slits let it open.
+        #
+        # This used to be a cone with its wide end at the rim and its point outside the part. It
+        # narrowed toward the outside, so a ball seated more than about its own radius under the
+        # surface met solid material on the way in (0.34 mm per side for a 3 mm ball on the
+        # coupon, outside the reach of the slits), and could not be pushed in. `push_in` measures it.
+        lead_r = R + gap + BALL_LEAD
+        z_rim = c - depth
+        r_top = math.sqrt(max((R + gap) ** 2 - (depth - 0.05) ** 2, 1e-9)) - 0.01
+        z_bot = -(c + R)
+        swing = trimesh.creation.revolve(
+            np.array([[0.0, z_rim + 0.05], [r_top, z_rim + 0.05], [mouth_r, z_rim],
+                      [lead_r, z_rim - (lead_r - mouth_r)], [lead_r, z_bot], [0.0, z_bot]]),
+            sections=64)
+        if swing.volume < 0:
+            swing.invert()
 
         # Union, not concatenate. With `util.concatenate` the cutters stay separate interpenetrating
         # shells, the difference leaves walls where they overlap, and the socket comes out with
@@ -371,3 +384,53 @@ def socket_reach(size):
     outer = R + BALL_CLEAR + BALL_WALL
     below = R * 1.35 / 2.0 + R * 0.72
     return float(math.hypot(outer, below))
+
+
+def push_in(part, size, axis, at, length=None, step=0.05):
+    """How hard a ball is to push home into its socket in `part`, as (worst squeeze, where).
+
+    The ball travels along the joint axis from outside the part to its seat. At each height the
+    socket leaves a free radius round the axis, the distance from the axis to the nearest material
+    in that cross-section, and the ball is squeezed wherever it is wider than that. A snap socket
+    should squeeze only at its rim, by about `ball_grip(size)` per side, where the relief slits let
+    the rim open. A larger squeeze further out means solid material stands in the ball's way, and
+    the ball cannot be pushed in at all.
+
+    `worst` is the largest squeeze per side, in mm. `where` is how far the ball's centre still was
+    from its seat, along the axis, when that squeeze happened. `length` is the distance from `at` to
+    the ball's centre, as for `ball_centre`.
+    """
+    R = size / 2.0
+    a = np.asarray(axis, float)
+    a = a / max(float(np.linalg.norm(a)), 1e-9)
+    at = np.asarray(at, float)
+    c = float(ball_reach(size) if length is None else length)
+    # start with the ball wholly outside the part
+    first = float(((np.asarray(part.vertices, float) - at) @ a).min())
+    s0 = min(first - R - step, -R - step)
+    zs = np.arange(s0 - R, c + R + step, step)
+    free = np.full(len(zs), np.inf)
+    for i, z in enumerate(zs):
+        o = at + a * z
+        sec = part.section(plane_origin=o, plane_normal=a)
+        if sec is None:
+            continue                                   # no material at this height
+        if bool(part.contains(o[None])[0]):
+            free[i] = 0.0                              # the axis itself is in material
+            continue
+        best = np.inf
+        for seg in sec.discrete:
+            p, q = seg[:-1], seg[1:]
+            d = q - p
+            L2 = np.maximum((d * d).sum(axis=1), 1e-12)
+            t = np.clip(((o - p) * d).sum(axis=1) / L2, 0.0, 1.0)
+            best = min(best, float(np.linalg.norm(p + d * t[:, None] - o, axis=1).min()))
+        free[i] = best
+    worst, where = -np.inf, 0.0
+    for s in zs[(zs >= s0) & (zs <= c + 1e-9)]:
+        near = np.abs(zs - s) <= R
+        half = np.sqrt(np.maximum(R * R - (zs[near] - s) ** 2, 0.0))
+        sq = float((half - free[near]).max())
+        if sq > worst:
+            worst, where = sq, c - float(s)
+    return worst, where

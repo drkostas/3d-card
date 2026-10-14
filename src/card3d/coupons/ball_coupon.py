@@ -1,12 +1,14 @@
 """Ball-joint coupon. Checks that a ball and socket assemble, hold, and turn, by measuring them.
 
 For each ball size the check builds the socket in a small block and the ball on a stem, using the
-joint geometry in card3d.joints, and measures four things.
+joint geometry in card3d.joints, and measures five things.
 
 1. The socket is one solid with no sealed voids inside it.
 2. The socket rim is narrower than the ball, so something retains the ball.
 3. Pulling the ball out of the socket meets interference, so the ball does not fall out.
 4. The seated ball tilts at least 30 degrees in every direction without clashing.
+5. Pushed in along its axis from outside, the ball is squeezed no more than the rim's designed grip,
+   so the only thing in its way is the rim the slits let open.
 
 To use it, run `python -m card3d.coupons.ball_coupon`. It reports each size from 3 mm to 6 mm. Then
 print the joints at the sizes you need, push each ball into its socket by hand and test the twist.
@@ -26,11 +28,18 @@ The checks encode the following lessons.
 - Retention is not measured on the seated ball. A seated ball should not touch the rim, so zero
   interference there is correct. The test pulls the ball out and measures what it has to pass on
   the way, which is check 3.
+- A ball that is held but cannot be put in is no joint. The cut below the rim once narrowed toward
+  the outside, so every check above passed on a socket the ball could not reach. Check 5 pushes the
+  ball in and measures the squeeze on the way (`joints.push_in`).
 """
 import numpy as np
 import trimesh
 
 from card3d import joints as J
+
+# The ball may be squeezed this much more than the rim's designed grip on its way in. The rim is
+# measured on a tessellated sphere, so the measured squeeze is a little above the exact one.
+PUSH_IN_SLACK = 1.25
 
 
 def socket_block(size, axis, at):
@@ -84,6 +93,10 @@ def check(size=5.0, verbose=True):
         swing[deg] = worst
     free_to = max([d for d, v in swing.items() if v < 1.0], default=0)
 
+    # 5. the ball must go in, meeting nothing harder than the rim on the way
+    squeeze, where = J.push_in(sock, size, axis, at)
+    goes_in = squeeze <= J.ball_grip(size) * PUSH_IN_SLACK + 0.02
+
     if verbose:
         print(f"  ball {size:.1f} mm, cup reaches {depth:.2f} mm past the equator")
         print(f"    socket is one sound solid          {'yes' if sound else 'NO'}"
@@ -95,9 +108,11 @@ def check(size=5.0, verbose=True):
         for d, v in swing.items():
             print(f"    seated, tilted {d:2d} deg all round   clash {v:6.3f} mm3")
         print(f"    turns freely to at least           {free_to} deg")
+        print(f"    pushed in, squeezed at most        {squeeze:.3f} mm/side, {where:.2f} mm before "
+              f"the seat (grip {J.ball_grip(size):.3f})  {'' if goes_in else '  <- CANNOT BE PUSHED IN'}")
     return {"sound": sound, "grips": grips, "retain_mm3": peak,
-            "free_deg": free_to, "rim": rim, "ball_r": R,
-            "ok": bool(sound and grips and peak > 0.05 and free_to >= 30)}
+            "free_deg": free_to, "rim": rim, "ball_r": R, "push_in_mm": squeeze,
+            "ok": bool(sound and grips and peak > 0.05 and free_to >= 30 and goes_in)}
 
 
 if __name__ == "__main__":

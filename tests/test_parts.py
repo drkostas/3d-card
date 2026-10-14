@@ -17,6 +17,33 @@ def test_each_joint_fits_its_socket(kind):
     assert outside.is_empty or outside.volume < 0.02 * peg.volume   # only grip, if any
 
 
+@pytest.mark.parametrize("size", [3.0, 5.0])
+def test_a_ball_can_be_pushed_home(size):
+    from card3d.coupons import ball_coupon as C
+    axis, at = np.array([0.0, 0.0, 1.0]), np.zeros(3)
+    sock = C.socket_block(size, axis, at)
+    squeeze, where = J.push_in(sock, size, axis, at)
+    # only the rim may squeeze, and only by about its designed grip
+    assert squeeze <= J.ball_grip(size) * C.PUSH_IN_SLACK + 0.02, (squeeze, where)
+    assert squeeze > 0.0                       # and the rim does grip
+    assert where < size / 2.0                  # where the slits are, not further out
+
+
+def test_push_in_sees_a_blocked_socket():
+    # a plain cylinder of material over the cavity's mouth: the ball cannot get past it
+    size, axis, at = 3.0, np.array([0.0, 0.0, 1.0]), np.zeros(3)
+    c = J.ball_centre(size, axis, at)
+    blk = trimesh.creation.cylinder(radius=3.0, height=6.0)
+    blk.apply_translation(c)
+    cav = trimesh.creation.icosphere(subdivisions=3, radius=size / 2.0 + J.BALL_CLEAR)
+    cav.apply_translation(c)
+    bore = trimesh.creation.cylinder(radius=0.6, height=10.0)
+    bore.apply_translation(c - np.array([0.0, 0.0, 5.0]))
+    sock = blk.difference(trimesh.boolean.union([cav, bore]))
+    squeeze, _where = J.push_in(sock, size, axis, at)
+    assert squeeze > 0.8
+
+
 def test_flat_card_round_trip():
     plates = {}
     for i, (w, h) in enumerate([(30, 12), (18, 18), (40, 8)]):
