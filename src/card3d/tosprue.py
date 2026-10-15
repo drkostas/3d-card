@@ -437,6 +437,12 @@ SOLE_STEPS = (0.0, 0.2, 0.3, 0.6, 0.9, 1.2, 1.5)
 SOLE_CLEAR = 0.4         # and how far the cut must stay clear of any post or socket
 MIN_BED = 30.0           # the smallest first layer a part is allowed to print on
 REST_FACES = 60          # how many resting directions to try, biggest hull face first
+# The faces a part may rest on, by part name, for the cases a score cannot judge. A wheel stood on
+# its tread gets its sole cut into the tread and no longer rolls, and a figure's head laid on its
+# face gets a flat on an eye. Neither shows in bed area, supports or post angle. Each entry is a list
+# of directions in the frame of the parts passed to `seated`, each the outward normal of a face that
+# may go down on the plate. A part not named here is scored over every face it can rest on.
+REST = {}
 
 
 def bed_area(mesh, layer=0.20):
@@ -520,7 +526,10 @@ def seated(parts, made, verbose=False):
     out, log, notes_bad = {}, [], []
     for n, m in parts.items():
         best = None
-        for v in rest_orientations(m):
+        named = REST.get(n)
+        dirs = ([np.asarray(v, float) / max(float(np.linalg.norm(v)), 1e-12) for v in named]
+                if named else rest_orientations(m))
+        for v in dirs:
             R = trimesh.geometry.align_vectors(np.asarray(v, float), [0.0, 0.0, -1.0])
             q = m.copy()
             q.apply_transform(R)
@@ -590,7 +599,7 @@ def seated(parts, made, verbose=False):
             else:
                 notes_bad.append(n)
         out[n] = mesh
-        log.append({"part": n, "bed_mm2": round(a, 1), "sole_mm": d,
+        log.append({"part": n, "bed_mm2": round(a, 1), "sole_mm": d, "rest": "named" if named else "scored",
                     "post_off_plate_deg": round(tilt, 1), "support_frac": round(sup, 3),
                     "matrix": T.tolist(),
                     # the size as seated, so a later step can tell a pure slide on the card from a
