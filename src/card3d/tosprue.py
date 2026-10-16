@@ -27,6 +27,7 @@ import numpy as np
 import trimesh
 from shapely.geometry import Point, Polygon, box as shapely_box
 
+from base3d.mesh import as_written as _as_written
 from base3d.mesh import surface_points as _surface_points
 from card3d import joints as J
 from card3d import simulator as S
@@ -1116,6 +1117,10 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
             # lands tens of millimetres from the part.
             "to_card": {n: (np.asarray(moved[n], float) @ seat_m.get(n, np.eye(4))).tolist()
                         for n in placed},
+            # The card as a slicer will read it: written as an STL and read back. One closed body in
+            # memory can be several pieces with holes in the file, because a boolean can keep
+            # vertices apart only by their index and a 32-bit file welds them.
+            "as_written": _as_written(card),
             "packed": used_pack}
 
 

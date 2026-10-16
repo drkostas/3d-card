@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `build` and `best_card` return `as_written`, the card written as an STL and read back (3d-base's `as_written`): pieces, holes, touching edges and loose volume. One closed body in memory can be several pieces with holes in the file. Needs 3d-base 0.3.
 - `build` and `best_card` return `to_card`, one matrix per part from the world to the card (the seat and then the layout's moves), so a world point such as a joint's centre can be found on the card. `moved` alone starts from the seated part.
 - Ball sockets can now be assembled when the ball sits deep in the part. The cut below the rim used to narrow toward the outside, so a ball seated more than about its own radius under the surface met solid material on the way in. It is now a lead-in a little wider than the ball, and the slit rim is the only squeeze.
 - `joints.push_in` measures how hard a ball is to push home into a socket in any part, and the ball coupon checks it as its fifth check.
