@@ -1110,6 +1110,12 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
             # extents, fails for a part with a round footprint: a spun disc has the same extents,
             # so it is mapped back to the wrong place.
             "moved": moved,
+            # Where each part went, from the world to the card, in one matrix: the seat (the part
+            # turned onto its rest face and dropped to the plate) and then the layout's moves.
+            # `moved` alone starts from the seated part, and a world point mapped through it alone
+            # lands tens of millimetres from the part.
+            "to_card": {n: (np.asarray(moved[n], float) @ seat_m.get(n, np.eye(4))).tolist()
+                        for n in placed},
             "packed": used_pack}
 
 

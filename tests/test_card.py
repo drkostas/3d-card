@@ -43,3 +43,17 @@ def test_build_needs_a_source():
         assert "source" in str(e)
     else:
         raise AssertionError("build() without source= must refuse")
+
+
+def test_a_world_point_maps_onto_its_part_on_the_card(kit):
+    # the socket's centre is a world point inside the block's material (its wall), and mapped
+    # through to_card it must land inside the block as placed, seated and moved
+    got, _rep = T.best_card(verbose=False, source=kit)
+    j = got["joints"][0]
+    at = np.asarray(j["at"], float)
+    block = got["parts"]["block"]
+    on_card = trimesh.transform_points([at], np.asarray(got["to_card"]["block"], float))[0]
+    lo, hi = block.bounds
+    assert np.all(on_card >= lo - 1e-6) and np.all(on_card <= hi + 1e-6)
+    off = trimesh.transform_points([at], np.asarray(got["moved"]["block"], float))[0]
+    assert not (np.all(off >= lo - 1e-6) and np.all(off <= hi + 1e-6)) or np.allclose(off, on_card)
