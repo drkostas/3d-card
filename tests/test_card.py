@@ -57,3 +57,9 @@ def test_a_world_point_maps_onto_its_part_on_the_card(kit):
     assert np.all(on_card >= lo - 1e-6) and np.all(on_card <= hi + 1e-6)
     off = trimesh.transform_points([at], np.asarray(got["moved"]["block"], float))[0]
     assert not (np.all(off >= lo - 1e-6) and np.all(off <= hi + 1e-6)) or np.allclose(off, on_card)
+
+
+def test_the_card_reads_back_from_its_file_as_one_piece(kit):
+    got, _rep = T.best_card(verbose=False, source=kit)
+    w = got["as_written"]
+    assert w["ok"] and w["bodies"] == 1 and w["holes"] == 0
