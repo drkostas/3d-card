@@ -484,6 +484,41 @@ def rest_orientations(mesh, n=REST_FACES):
     return keep
 
 
+def flat_sides(mesh, tol_deg=3.0):
+    """The two faces a part cut from a plate should rest on: [n, -n], for `REST`.
+
+    `n` is the direction that carries the most flat area of the part's own surface (faces within
+    `tol_deg` of it either way). For a clip, a C-ring or anything shaped like a cut-out plate, those
+    are its two flat sides. Printed lying on one, its outline is in every layer and the arms that
+    flex run along the layers. Stood on its edge, the same arms are split across the layer lines and
+    are the first thing to snap when the part is pushed onto what it holds. Bed area and supports
+    cannot see that, so the score alone can lay one of a mirrored pair flat and stand the other on
+    its edge.
+    """
+    n = np.asarray(mesh.face_normals, float)
+    a = np.asarray(mesh.area_faces, float)
+    if not len(a):
+        raise ValueError("flat_sides: the mesh has no faces")
+    cos = np.cos(np.radians(tol_deg))
+    # Coarse bins first (a normal and its opposite share one), then the exact grouping only from the
+    # biggest bins. Comparing every face with every other face is quadratic in the face count.
+    big = np.argmax(np.abs(n), axis=1)
+    c = n * np.sign(n[np.arange(len(n)), big])[:, None]
+    keys, inv = np.unique(np.round(c, 2), axis=0, return_inverse=True)
+    binned = np.bincount(inv.reshape(-1), weights=a, minlength=len(keys))
+    best, best_area = None, -1.0
+    for k in np.argsort(-binned)[:24]:
+        seed = keys[k] / max(float(np.linalg.norm(keys[k])), 1e-12)
+        got = float(a[np.abs(n @ seed) >= cos].sum())
+        if got > best_area:
+            best, best_area = seed, got
+    # the group's mean direction, not the one face that seeded it
+    grp = np.abs(n @ best) >= cos
+    v = ((n[grp] * np.sign(n[grp] @ best)[:, None]) * a[grp][:, None]).sum(axis=0)
+    v = v / max(float(np.linalg.norm(v)), 1e-12)
+    return [v, -v]
+
+
 def _feature_floor(part_name, made, R):
     """How low the lowest post or socket wall sits once the part is turned this way.
 
@@ -731,15 +766,47 @@ ACROSS = set()
 
 
 def _spin_flat(mesh, want):
-    """Turn a part about Z so its long axis lies the way the card wants it.
+    """Turn a part about Z so it lies the way the card wants it.
 
     Only about Z. Any other axis would change which face is on the plate, and `seated` chose that
     face to give the part a first layer.
+
+    `want` is one of:
+      None            leave the part as it is.
+      "down"/"across" put the part's long axis down the card, or across it.
+      ("up", ref)     spin so `ref`, a direction in the part's own frame, points up the card. Give
+                      the model's up here and a compact part stands the way it does on the model, so
+                      the card read top down shows it the right way up.
+      ("long", ref)   put the long axis down the card, with the end nearer `ref` at the top. For a
+                      limb that hangs, give the model's up and the joint end goes up, the free end
+                      down, however the limb is bent.
+    `ref` may project to nothing on the card (it points straight at or away from the viewer); then
+    "up" leaves the part alone and "long" falls back to the bare long axis.
     """
     if want is None:
         return mesh, 0.0
     v = np.asarray(mesh.vertices, float)[:, :2]
     c = v.mean(axis=0)
+    if isinstance(want, tuple):
+        mode, ref = want
+        r = np.asarray(ref, float).reshape(-1)[:2]
+        rn = float(np.hypot(r[0], r[1]))
+        if mode == "up":
+            if rn < 1e-6:
+                return mesh, 0.0
+            turn = np.pi / 2 - float(np.arctan2(r[1], r[0]))
+        elif mode == "long":
+            _u, _s, vt = np.linalg.svd(v - c, full_matrices=False)
+            d = vt[0]
+            if rn > 1e-6 and float(d @ (r / rn)) < 0.0:      # point its `ref` end up the card
+                d = -d
+            turn = np.pi / 2 - float(np.arctan2(d[1], d[0]))
+        else:
+            raise ValueError(f"_spin_flat: unknown reading mode {mode!r}")
+        m = mesh.copy()
+        m.apply_transform(trimesh.transformations.rotation_matrix(
+            turn, [0, 0, 1], mesh.bounds.mean(axis=0)))
+        return m, turn
     u, s, vt = np.linalg.svd(v - c, full_matrices=False)
     ang = float(np.arctan2(vt[0][1], vt[0][0]))          # where its long axis points now
     target = np.pi / 2 if want == "down" else 0.0
@@ -773,16 +840,20 @@ def _spin_flat(mesh, want):
     return m, turn
 
 
-def lay_out_anatomical(parts, inner_w=200.0, rows=None, down=None, across=None):
+def lay_out_anatomical(parts, inner_w=200.0, rows=None, down=None, across=None, upright=None):
     """Lay the card out in reading order: the rows given, top to bottom, then any other parts.
 
     The layout is 2D and the model is 3D, so it is a reading order rather than a literal exploded
     view. A row that will not fit the card's width wraps, and any part the rows do not name is
     added in a last row rather than dropped.
+
+    `upright`, when given, is {name: ("up"|"long", ref)}: parts to turn so they read the way they sit
+    on the model (see `_spin_flat`). It wins over `down`/`across` for a part named in both.
     """
     rows = ANATOMY if rows is None else rows
     down = DOWN if down is None else set(down)
     across = ACROSS if across is None else set(across)
+    upright = {} if upright is None else dict(upright)
     placed, shapes, moved = {}, {}, {}
     order, seen = [], set()
     for row in rows:
@@ -795,7 +866,7 @@ def lay_out_anatomical(parts, inner_w=200.0, rows=None, down=None, across=None):
         order.append(leftover)                            # parts no row named
 
     for n, m in parts.items():
-        want = "down" if n in down else ("across" if n in across else None)
+        want = upright.get(n, "down" if n in down else ("across" if n in across else None))
         p, turn = _spin_flat(m.copy(), want)
         placed[n] = p
         R = np.eye(4)
@@ -863,6 +934,35 @@ def lay_out_anatomical(parts, inner_w=200.0, rows=None, down=None, across=None):
     return placed, shapes, (inner_w + 2 * FRAME_W, H), at, moved, bar_ys
 
 
+def cross_bars(placed, h_centres, W, H, pitch=BAR_PITCH):
+    """Vertical runner segments that fill the clear lanes between the horizontal bars.
+
+    The reading layout gives the card horizontal rungs, one under each row, and wide empty lanes
+    beside the narrow rows. Vertical segments in those lanes make the frame read as a grid and hold
+    each part on more than one side, so a long part is not cantilevered off a single rung. A segment
+    is added only where a BAR_W-wide column clears every part by BAR_CLEAR, so it never fuses a part
+    to the frame, which no amount of snipping would free. Returns [(x, y0, y1)] in frame coordinates,
+    each spanning between two horizontal lines so it overlaps both and unions into one body.
+    """
+    # the horizontal lines a vertical may run between: the two rails' centres and every bar centre
+    levels = sorted(set([FRAME_W / 2.0] + [float(c) for c in h_centres] + [H - FRAME_W / 2.0]))
+    boxes = [(float(p.bounds[0][0]), float(p.bounds[1][0]),
+              float(p.bounds[0][1]), float(p.bounds[1][1])) for p in placed.values()]
+    xs = np.arange(FRAME_W + pitch / 2.0, W - FRAME_W, pitch)
+    segs = []
+    for x in xs:
+        col_lo, col_hi = x - BAR_W / 2.0 - BAR_CLEAR, x + BAR_W / 2.0 + BAR_CLEAR
+        for y0, y1 in zip(levels[:-1], levels[1:]):
+            if y1 - y0 < BAR_W + 2 * BAR_CLEAR + 1.0:        # no useful room between these two lines
+                continue
+            band_lo, band_hi = y0 - BAR_CLEAR, y1 + BAR_CLEAR
+            if any(col_hi > xlo and col_lo < xhi and band_hi > ylo and band_lo < yhi
+                   for (xlo, xhi, ylo, yhi) in boxes):
+                continue
+            segs.append((float(x), float(y0), float(y1)))
+    return segs
+
+
 def lay_out(parts, inner_w=200.0):
     """Drop every part onto the frame plane and nest them in shelves, keeping each one's orientation.
 
@@ -898,7 +998,8 @@ def lay_out(parts, inner_w=200.0):
 # over a small footprint topples, and a base fixes that. A model that stands on its own (its
 # centre of mass projects inside its contact footprint) does not need one, so it is off by default.
 def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True, seat=True,
-          anatomical=True, source=None, base_for=None, rows=None, down=None, across=None, bed=None):
+          anatomical=True, source=None, base_for=None, rows=None, down=None, across=None, bed=None,
+          upright=None, cross=False):
     # the parts, the joints between them and the notes come from the caller's source
     if source is None:
         raise ValueError("build() needs source=: a callable returning (parts, made, notes)")
@@ -928,7 +1029,19 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
     if packed is not None:
         placed, shapes, (W, H), at, moved = packed
     elif anatomical:
-        placed, shapes, (W, H), at, moved, own_bars = lay_out_anatomical(parts, inner_w, rows=rows, down=down, across=across)
+        # Reading orientation. The caller names parts to stand the way they sit on the model, each
+        # with a mode ("up" for a compact part, "long" for a limb that hangs). The direction that
+        # should point up the card is the model's own up, carried through the seating turn into the
+        # frame the layout sees, so a part laid flat for printing still reads the right way up.
+        upright_ref = None
+        if upright:
+            seat_rot = {r["part"]: np.asarray(r["matrix"], float)[:3, :3] for r in seat_log}
+            upright_ref = {}
+            for n, mode in upright.items():
+                if n in parts:
+                    upright_ref[n] = (mode, seat_rot.get(n, np.eye(3)) @ np.array([0.0, 0.0, 1.0]))
+        placed, shapes, (W, H), at, moved, own_bars = lay_out_anatomical(
+            parts, inner_w, rows=rows, down=down, across=across, upright=upright_ref)
     else:
         placed, shapes, (W, H), at, moved = lay_out(parts, inner_w)
 
@@ -970,6 +1083,17 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
             extents=[W, BAR_W, FRAME_T],
             transform=trimesh.transformations.translation_matrix(
                 [W / 2, by, FRAME_T / 2])))
+
+    # Vertical runners in the clear lanes, so the frame is a grid and a long part is held on more
+    # than one side. Each segment overlaps the two horizontal lines it runs between, so it unions
+    # into the one frame body rather than floating. `cross_bars` has refused any column that a part
+    # sits in, so none of these fuses a part to the frame.
+    if cross and anatomical:
+        for x, y0, y1 in cross_bars(placed, bars, W, H):
+            frame.append(trimesh.creation.box(
+                extents=[BAR_W, y1 - y0, FRAME_T],
+                transform=trimesh.transformations.translation_matrix(
+                    [x, (y0 + y1) / 2.0, FRAME_T / 2])))
 
     # Part numbers go on the runner, as on a model kit. They are stamped on the frame rather than
     # on the part, so nothing is left on a piece after it is snipped. Numbering is alphabetical by
