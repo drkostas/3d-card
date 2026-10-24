@@ -58,6 +58,14 @@ tosprue.build(source=source,
 
 Parts you do not name go into a last row. Someone can then put the kit together without instructions.
 
+To make each part read the way it sits on the model, name it in `upright`. `"up"` turns the model's up toward the top of the card, so a head reads face up. `"long"` stands a limb down the card with its joint end at the top, so a hanging arm reads shoulder up and hand down. `cross=True` adds vertical runners where there is room, so the frame is a grid and long parts are held on more than one side.
+
+```python
+tosprue.build(source=source, rows=rows,
+              upright={"head": "up", "arm_left": "long", "arm_right": "long"},
+              cross=True)
+```
+
 ### Joints
 
 `card3d.joints` makes the two halves of a joint (`male` is what sticks out, `female` is what is cut away) for pegs, axles, pivots, ball joints, tabs and cross laps. The clearances were measured on a real printer with the two test prints in `card3d.coupons` (0.30 mm for push fits, 0.20 mm for a pivot that holds its pose). Print the coupons on your own printer and change `joints.CLEAR` and `joints.PIVOT_CLEAR` if yours differ.

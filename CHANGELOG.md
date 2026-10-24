@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `build` and `best_card` take `upright={part: "up" | "long"}`, so a part reads on the card the way it sits on the model. "up" turns the model's up toward the top of the card (a head reads face up). "long" stands a limb's long axis down the card with its joint end at the top. The model's up is carried through the seating turn, so a part laid flat for printing still reads the right way up. It wins over `down` and `across`.
+- `build` and `best_card` take `cross=True`, which adds vertical runners in the clear lanes between the horizontal bars, so the frame is a grid and a long part is held on more than one side. A runner is placed only where it clears every part by `BAR_CLEAR`, so it never fuses a part to the frame. `cross_bars` returns the segments.
+- `tosprue.flat_sides(mesh)` returns the two flat sides of a part cut from a plate, for `REST`. A clip or C-ring printed on its flat side has its flexing arms along the layers. Stood on its edge, they are split across the layer lines. The score alone could lay one of a mirrored pair flat and stand the other on its edge.
 - `build` and `best_card` return `as_written`, the card written as an STL and read back (3d-base's `as_written`): pieces, holes, touching edges and loose volume. One closed body in memory can be several pieces with holes in the file. Needs 3d-base 0.3.
 - `build` and `best_card` return `to_card`, one matrix per part from the world to the card (the seat and then the layout's moves), so a world point such as a joint's centre can be found on the card. `moved` alone starts from the seated part.
 - Ball sockets can now be assembled when the ball sits deep in the part. The cut below the rim used to narrow toward the outside, so a ball seated more than about its own radius under the surface met solid material on the way in. It is now a lead-in a little wider than the ball, and the slit rim is the only squeeze.

@@ -63,3 +63,94 @@ def test_the_card_reads_back_from_its_file_as_one_piece(kit):
     got, _rep = T.best_card(verbose=False, source=kit)
     w = got["as_written"]
     assert w["ok"] and w["bodies"] == 1 and w["holes"] == 0
+
+
+def test_up_mode_turns_the_models_up_to_the_top_of_the_card():
+    # a part whose model-up currently points up and to the right on the card
+    m = trimesh.creation.box(extents=(6, 6, 6))
+    ref = np.array([1.0, 1.0, 0.0])
+    _p, turn = T._spin_flat(m, ("up", ref))
+    rot = trimesh.transformations.rotation_matrix(turn, [0, 0, 1])[:3, :3]
+    got = rot @ ref
+    assert got[1] > 0 and abs(got[0]) < 1e-6         # now points straight up the card (+Y)
+
+
+def test_up_mode_leaves_a_part_whose_up_points_at_the_viewer():
+    m = trimesh.creation.box(extents=(6, 6, 6))
+    _p, turn = T._spin_flat(m, ("up", np.array([0.0, 0.0, 1.0])))
+    assert turn == 0.0                               # nothing to turn about Z
+
+
+def test_long_mode_hangs_the_limb_with_its_ref_end_at_the_top():
+    m = trimesh.creation.box(extents=(20, 3, 3))     # long axis along X
+    p, turn = T._spin_flat(m, ("long", np.array([1.0, 0.2, 0.0])))  # +X end is the joint end
+    b = p.bounds
+    assert (b[1][1] - b[0][1]) > (b[1][0] - b[0][0])  # long axis now runs down the card
+    rot = trimesh.transformations.rotation_matrix(turn, [0, 0, 1], m.bounds.mean(axis=0))
+    tip = trimesh.transform_points(np.array([[10.0, 0.0, 0.0]]), rot)[0]
+    assert tip[1] > float(m.bounds.mean(axis=0)[1])   # the +X end ended up at the top
+
+
+def test_upright_wins_over_down_and_across(kit):
+    # a part named in both upright and across takes the upright turn (build resolves the mode string
+    # against the seating turn). "long" stands the rod's long axis down the card, across lays it flat.
+    a = T.build(verbose=False, source=kit, rows=[["wheel"], ["block"], ["rod"]],
+                across={"rod"}, upright={"rod": "long"})
+    rod = a["parts"]["rod"]
+    b = rod.bounds
+    assert (b[1][1] - b[0][1]) > (b[1][0] - b[0][0])  # the rod hangs down, not across
+
+
+def test_cross_bars_never_cross_a_part():
+    a = trimesh.creation.box(extents=(10, 10, 2)); a.apply_translation((20, 30, 1))
+    b = trimesh.creation.box(extents=(10, 10, 2)); b.apply_translation((60, 30, 1))
+    placed = {"a": a, "b": b}
+    segs = T.cross_bars(placed, [15.0, 45.0], 80.0, 60.0, pitch=12.0)
+    assert segs                                       # verticals fit the clear lane between the parts
+    for (x, y0, y1) in segs:
+        for p in placed.values():
+            lo, hi = p.bounds
+            overlap_x = (x + T.BAR_W / 2 > lo[0]) and (x - T.BAR_W / 2 < hi[0])
+            overlap_y = (y1 > lo[1]) and (y0 < hi[1])
+            assert not (overlap_x and overlap_y)
+
+
+def _ring_with_a_stub(R):
+    # a ring cut from a 2 mm plate with a round stub on its rim, turned by R
+    ring = trimesh.creation.annulus(r_min=4.0, r_max=6.0, height=2.0, sections=96)
+    stub = trimesh.creation.cylinder(radius=1.4, height=8.0, sections=48)
+    stub.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0]))
+    stub.apply_translation([9.0, 0.0, 0.0])
+    m = trimesh.util.concatenate([ring, stub])
+    m.apply_transform(R)
+    return m
+
+
+def test_flat_sides_finds_the_plate_a_ring_was_cut_from():
+    R = trimesh.transformations.rotation_matrix(0.9, [0.3, 0.8, 0.5])
+    up = R[:3, :3] @ np.array([0.0, 0.0, 1.0])
+    a, b = T.flat_sides(_ring_with_a_stub(R))
+    assert abs(abs(float(a @ up)) - 1.0) < 1e-6 and np.allclose(a, -b)
+
+
+def test_flat_sides_lays_both_of_a_mirrored_pair_flat(monkeypatch):
+    # the same ring and its mirror image, each named in REST through flat_sides, both come out of
+    # `seated` lying on a flat side: the plate normal is vertical for each
+    R = trimesh.transformations.rotation_matrix(0.9, [0.3, 0.8, 0.5])
+    left = _ring_with_a_stub(R)
+    right = left.copy()
+    right.apply_transform(trimesh.transformations.scale_matrix(-1, direction=[1, 0, 0]))
+    right.invert()
+    parts = {"left": left, "right": right}
+    monkeypatch.setattr(T, "REST", {k: T.flat_sides(m) for k, m in parts.items()})
+    _out, log = T.seated(parts, [])
+    for r in log:
+        M = np.asarray(r["matrix"], float)[:3, :3]
+        n = T.flat_sides(parts[r["part"]])[0]
+        assert abs(abs(float((M @ n)[2])) - 1.0) < 1e-6, r["part"]
+
+
+def test_cross_bars_keep_one_solid_card_that_still_comes_apart(kit):
+    got = T.build(verbose=False, source=kit, rows=[["wheel"], ["block"], ["rod"]], cross=True)
+    rep = T.round_trip(got, verbose=False)
+    assert got["bodies"] == 1 and rep["ok"]
