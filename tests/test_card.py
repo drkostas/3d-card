@@ -154,3 +154,52 @@ def test_cross_bars_keep_one_solid_card_that_still_comes_apart(kit):
     got = T.build(verbose=False, source=kit, rows=[["wheel"], ["block"], ["rod"]], cross=True)
     rep = T.round_trip(got, verbose=False)
     assert got["bodies"] == 1 and rep["ok"]
+
+
+def test_a_nested_card_is_one_body_that_comes_apart(kit):
+    got = T.build(verbose=False, source=kit, nest=True, nest_width=60.0)
+    rep = T.round_trip(got, verbose=False)
+    assert got["bodies"] == 1 and rep["ok"], got["notes"]
+    assert not got["weak"], got["notes"]
+
+
+def test_every_nested_part_is_held_from_two_sides(kit):
+    got = T.build(verbose=False, source=kit, nest=True, nest_width=60.0)
+    for n, m in got["parts"].items():
+        hold = got["holds"][n]
+        assert len(hold) >= 2, n
+        c = np.asarray(m.centroid[:2])
+        ang = [np.degrees(np.arctan2(y - c[1], x - c[0])) for x, y in hold]
+        widest = max(abs((a - b + 180) % 360 - 180) for i, a in enumerate(ang) for b in ang[i + 1:])
+        assert widest >= T.HOLD_SPREAD_DEG * 0.9, (n, ang)
+        gates = [g for g in got["gates"] if g[0] == n]
+        assert len(gates) >= 2, n
+
+
+def test_web_runners_keep_their_gap(kit):
+    from shapely.geometry import Polygon
+    got = T.build(verbose=False, source=kit, nest=True, nest_width=60.0)
+    W, H, _z = got["size"]
+    net, holds, weak = T.web_runners(got["parts"], W, H)
+    # A part's own runner ends may come to 0.6 of the gap at their corners, where its gates cross;
+    # that is still clear air a slicer keeps apart. No runner ever touches a part.
+    for n, m in got["parts"].items():
+        fp = Polygon(T.footprint(m)).buffer(0)
+        assert net.distance(fp) >= T.NEST_GAP * 0.6 - 1e-6, n
+
+
+def test_the_nest_never_overlaps_two_parts(kit):
+    parts, _made, _notes = kit()
+    placed, moved, (W, H) = T.nest_outlines(parts, 60.0)
+    from shapely.geometry import Polygon
+    fps = {n: Polygon(T.footprint(m)).buffer(0) for n, m in placed.items()}
+    names = sorted(fps)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            assert fps[a].distance(fps[b]) >= 2 * T.NEST_CORRIDOR - 2 * T.NEST_STEP, (a, b)
+
+
+def test_a_named_card_carries_its_name(kit):
+    plain = T.build(verbose=False, source=kit, nest=True, nest_width=60.0)
+    named = T.build(verbose=False, source=kit, nest=True, nest_width=60.0, plate="KIT")
+    assert named["card"].volume > plain["card"].volume and named["bodies"] == 1

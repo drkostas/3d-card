@@ -840,7 +840,8 @@ def _spin_flat(mesh, want):
     return m, turn
 
 
-def lay_out_anatomical(parts, inner_w=200.0, rows=None, down=None, across=None, upright=None):
+def lay_out_anatomical(parts, inner_w=200.0, rows=None, down=None, across=None, upright=None,
+                       frame_w=FRAME_W, clear=BAR_CLEAR, lane=None):
     """Lay the card out in reading order: the rows given, top to bottom, then any other parts.
 
     The layout is 2D and the model is 3D, so it is a reading order rather than a literal exploded
@@ -849,7 +850,11 @@ def lay_out_anatomical(parts, inner_w=200.0, rows=None, down=None, across=None, 
 
     `upright`, when given, is {name: ("up"|"long", ref)}: parts to turn so they read the way they sit
     on the model (see `_spin_flat`). It wins over `down`/`across` for a part named in both.
+
+    `frame_w` is the outer frame's width, `clear` how near a part may come to it, and `lane` the room
+    between two rows besides the part gap. The defaults leave room for a bar under each row.
     """
+    lane = BAR_W + 2 * BAR_CLEAR if lane is None else float(lane)
     rows = ANATOMY if rows is None else rows
     down = DOWN if down is None else set(down)
     across = ACROSS if across is None else set(across)
@@ -884,9 +889,9 @@ def lay_out_anatomical(parts, inner_w=200.0, rows=None, down=None, across=None, 
     # usable width equals `need` exactly, and the last part on the widest row can fail
     # `wide + w > usable` on floating point alone. That throws it onto a line of its own and costs
     # a whole runner lane plus its height.
-    inner_w = min(inner_w, max(need + 2 * BAR_CLEAR + 0.5, 60.0))
+    inner_w = min(inner_w, max(need + 2 * clear + 0.5, 60.0))
 
-    y = FRAME_W + GAP / 2 + BAR_W + 2 * BAR_CLEAR
+    y = frame_w + GAP / 2 + lane
     at, bar_ys = {}, []
     # Y grows upwards, so the first row placed is the bottom one. The rows are placed in reverse
     # so the first row given ends up at the top and the card reads from the top down.
@@ -895,7 +900,7 @@ def lay_out_anatomical(parts, inner_w=200.0, rows=None, down=None, across=None, 
         # A part that reaches the side rail is welded to it, and snipping its gates cannot free
         # it, because the gates are not what holds it. The usable width is the inside of the
         # frame less that clearance at each end.
-        usable = inner_w - 2 * BAR_CLEAR
+        usable = inner_w - 2 * clear
         lines, line, wide = [], [], 0.0
         for n in row:
             w = float(placed[n].bounds[1][0] - placed[n].bounds[0][0]) + GAP
@@ -910,7 +915,7 @@ def lay_out_anatomical(parts, inner_w=200.0, rows=None, down=None, across=None, 
             widths = [float(placed[n].bounds[1][0] - placed[n].bounds[0][0]) + GAP for n in line]
             tall = max(float(placed[n].bounds[1][1] - placed[n].bounds[0][1]) for n in line)
             # centred, so it reads straight, and never nearer the rail than a part may sit
-            x = FRAME_W + BAR_CLEAR + max(0.0, (usable - sum(widths))) / 2.0
+            x = frame_w + clear + max(0.0, (usable - sum(widths))) / 2.0
             for n, w in zip(line, widths):
                 dx = x + GAP / 2 - float(placed[n].bounds[0][0])
                 dy = y - float(placed[n].bounds[0][1])
@@ -919,19 +924,377 @@ def lay_out_anatomical(parts, inner_w=200.0, rows=None, down=None, across=None, 
                 # `at` is relative to the inside of the frame, not an absolute position. The
                 # shelf bar placer reads it as `FRAME_W + at.y + GAP/2 - BAR_BACK`, so absolute
                 # coordinates would count the frame twice and put every bar through the row above.
-                at[n] = (x - FRAME_W, y - FRAME_W - GAP / 2)
+                at[n] = (x - frame_w, y - frame_w - GAP / 2)
                 x += w
             # A bar is a box with width, not a line. Deriving its position from `at` with the
             # shelf packer's formula can put its edge inside a row. So this layout places its own
             # bars: the bar's centre sits half its width plus the clearance below the row it
             # carries, and the next row starts beyond it.
-            bar_ys.append(y - BAR_CLEAR - BAR_W / 2.0)
+            bar_ys.append(y - clear - BAR_W / 2.0)
             # No extra `GAP` on top of the lane. The lane already has BAR_CLEAR on both sides of
             # the bar, so adding the part gap again would charge for the same clearance twice
             # (12 mm over six rows, enough to decide whether the card fits the bed).
-            y += tall + GAP + BAR_W + 2 * BAR_CLEAR
-    H = y - GAP / 2 + FRAME_W
-    return placed, shapes, (inner_w + 2 * FRAME_W, H), at, moved, bar_ys
+            y += tall + GAP + lane
+    H = y - GAP / 2 + frame_w
+    return placed, shapes, (inner_w + 2 * frame_w, H), at, moved, bar_ys
+
+
+# A nested card, the way most printed kit cards are drawn: the parts fitted close by their real
+# outlines inside a thin frame, and thin straight runners in the gaps between them. Every part is
+# held at two or more points on different sides, so the card can be picked up and shaken and
+# nothing swings or drops. A part held at one point can pivot on its gate and snap it in handling.
+NEST_GAP = 1.5           # air between a part and the runner end its gate crosses
+NEST_RUNNER_W = 2.0      # a runner in the gaps
+NEST_FRAME_W = 2.5       # the outer frame
+NEST_CORNER = 3.0        # its corner radius
+NEST_CORRIDOR = NEST_GAP + NEST_RUNNER_W / 2.0 + 0.5   # what each part keeps clear round it in the nest
+NEST_STEP = 0.5          # the nest's raster, in mm
+PLATE_H = 9.0            # a name plate along the top edge, when the card has a name
+PLATE_TEXT_H = 6.5
+HOLDS = ((20.0, 2), (40.0, 3), (float("inf"), 4))   # how many runners hold a part, by its size
+HOLD_SPREAD_DEG = 90.0   # the widest angle between a part's holds, round its centre, at the least
+NEST_ALIGN_MM = 3.0      # how much longer a runner may be when it continues a line already drawn
+
+
+def _outline(mesh):
+    return Polygon(footprint(mesh)).buffer(0)
+
+
+def nest_outlines(parts, width=100.0, corridor=NEST_CORRIDOR, step=NEST_STEP, frame_w=NEST_FRAME_W,
+                  top=0.0):
+    """Fit the parts close by their real outlines: (placed, moved, (W, H)).
+
+    Largest first, each tried in four quarter turns about Z, at the lowest place where its outline,
+    grown by `corridor`, overlaps nothing placed (a bottom-left fill on a raster of `step` mm). Two
+    parts then stand at least twice `corridor` apart, room for one runner between them. `width` is
+    the inside of the frame. `top` reserves room along the top edge (a name plate). `corridor` may
+    be a mapping of part name to its own corridor, for a part that needs more room round it. A turn
+    about Z keeps the face each part rests on, so it changes nothing about how it prints.
+    """
+    from scipy.signal import fftconvolve
+    from shapely import contains_xy
+    cols = int(width / step)
+    canvas = np.zeros((int(1200 / step), cols), bool)
+    placed, moved = {}, {}
+    order = sorted(parts, key=lambda n: -_outline(parts[n]).area)
+    for n in order:
+        m0 = parts[n]
+        best = None
+        for k in range(4):
+            c = m0.bounds.mean(axis=0)
+            R = trimesh.transformations.rotation_matrix(k * np.pi / 2, [0, 0, 1], c)
+            m = m0.copy()
+            m.apply_transform(R)
+            fp = _outline(m).buffer(corridor.get(n, NEST_CORRIDOR) if isinstance(corridor, dict) else corridor)
+            x0, y0, x1, y1 = fp.bounds
+            xs = x0 + (np.arange(int((x1 - x0) / step) + 1) + 0.5) * step
+            ys = y0 + (np.arange(int((y1 - y0) / step) + 1) + 0.5) * step
+            X, Y = np.meshgrid(xs, ys)
+            mask = contains_xy(fp, X, Y)
+            h, w = mask.shape
+            if w > cols:
+                continue
+            hits = fftconvolve(canvas.astype(float), mask[::-1, ::-1].astype(float), mode="valid") > 0.5
+            free = np.argwhere(~hits)
+            if not len(free):
+                continue
+            tops = free[:, 0] + h
+            i = np.lexsort((free[:, 1], tops))[0]
+            key = (int(tops[i]), int(free[i][1]))
+            if best is None or key < best[0]:
+                best = (key, int(free[i][0]), int(free[i][1]), R, m, mask, x0, y0)
+        if best is None:
+            raise ValueError(f"nest_outlines: {n} does not fit a card {width} mm wide")
+        _key, r, cc, R, m, mask, x0, y0 = best
+        h, w = mask.shape
+        canvas[r:r + h, cc:cc + w] |= mask
+        by = [frame_w + cc * step - x0, frame_w + r * step - y0, -float(m.bounds[0][2])]
+        moved[n] = _slide(m, by, R)
+        placed[n] = m
+    used = np.argwhere(canvas.any(axis=1))
+    H = frame_w + (int(used.max()) + 1) * step + top + frame_w
+    return placed, moved, (width + 2 * frame_w, H)
+
+
+def _hold_count(outline):
+    x0, y0, x1, y1 = outline.bounds
+    size = max(x1 - x0, y1 - y0)
+    return next(k for limit, k in HOLDS if size < limit)
+
+
+def web_runners(placed, W, H, gap=NEST_GAP, width=NEST_RUNNER_W, frame_w=NEST_FRAME_W,
+                corner=NEST_CORNER, extra=None):
+    """The runners of a nested card: (network, holds, weak).
+
+    `network` is one 2D shape (shapely): the outer frame, `extra` (a name plate) and thin straight
+    runners in the gaps. Each part, largest first, is held by two to four runners (`HOLDS`), each
+    running straight along an axis from a point `gap` off the part to the frame or to a runner
+    already drawn, so the runners join into one web. A part boxed in by its neighbours is reached
+    by an L of two straight runners. The holds of one part are spread round it, at least
+    `HOLD_SPREAD_DEG` apart where its outline allows. `holds` maps each part to its hold points (on
+    the `gap` ring, where its gates go). `weak` names the parts held at fewer than two points or not
+    spread round, the parts that could swing on the card.
+    """
+    from shapely.geometry import LineString
+    from shapely.ops import nearest_points, unary_union
+    fps = {n: _outline(m) for n, m in placed.items()}
+    outer = shapely_box(0.0, 0.0, W, H).buffer(-corner).buffer(corner)
+    net = outer.difference(outer.buffer(-frame_w))
+    if extra is not None:
+        net = unary_union([net, extra])
+    strict = {n: p.buffer(gap * 0.95) for n, p in fps.items()}
+    axes = ((1, 0), (-1, 0), (0, 1), (0, -1))
+    diagonals = tuple((dx * 0.7071067811865476, dy * 0.7071067811865476)
+                      for dx in (1, -1) for dy in (1, -1))
+
+    def clear(band, n):
+        own = fps[n].buffer(gap * 0.6)
+        return not band.intersects(own) and not any(band.intersects(s) for k, s in strict.items() if k != n)
+
+    def straight(a, n, current, dirs=axes):
+        out = []
+        for dx, dy in dirs:
+            ray = LineString([(a.x, a.y), (a.x + dx * 1000.0, a.y + dy * 1000.0)])
+            hit = ray.intersection(current)
+            if hit.is_empty:
+                continue
+            b = nearest_points(a, hit)[1]
+            d = a.distance(b)
+            if d <= width / 2.0:
+                out.append((0.0, None, (dx, dy)))           # the frame or a runner is right there
+                continue
+            band = LineString([(a.x, a.y), (b.x + dx * 0.4, b.y + dy * 0.4)]).buffer(width / 2.0, cap_style=2)
+            if clear(band, n):
+                out.append((d, band, (dx, dy)))
+        return out
+
+    def nearest(a, n, current):
+        _a, b = nearest_points(a, current)
+        d = a.distance(b)
+        if d <= width / 2.0:
+            return 0.0, None
+        v = (np.asarray(b.coords[0]) - np.asarray(a.coords[0])) / d
+        band = LineString([(a.x, a.y), tuple(np.asarray(b.coords[0]) + v * 0.4)]).buffer(width / 2.0, cap_style=2)
+        return (d, band) if clear(band, n) else None
+
+    def l_shaped(a, n, current):
+        best = None
+        for dx, dy in axes:
+            for d in np.arange(2.0, 70.0, 1.0):
+                q = (a.x + dx * d, a.y + dy * d)
+                leg = LineString([(a.x, a.y), q]).buffer(width / 2.0, cap_style=2)
+                if not clear(leg, n):
+                    break
+                for ex, ey in axes:
+                    if (ex, ey) in ((dx, dy), (-dx, -dy)):
+                        continue
+                    ray = LineString([q, (q[0] + ex * 1000.0, q[1] + ey * 1000.0)])
+                    hit = ray.intersection(current)
+                    if hit.is_empty:
+                        continue
+                    b = nearest_points(Point(q), hit)[1]
+                    leg2 = LineString([(q[0] - ex * width / 2.0, q[1] - ey * width / 2.0),
+                                       (b.x + ex * 0.4, b.y + ey * 0.4)]).buffer(width / 2.0, cap_style=2)
+                    if not clear(leg2, n):
+                        continue
+                    total = d + Point(q).distance(b)
+                    if best is None or total < best[0]:
+                        best = (total, unary_union([leg, leg2]))
+        return best
+
+    holds, weak = {}, []
+    # The columns and rows runners already run along. A runner that continues one of them reads as
+    # one straight line through the card instead of a new short one beside it, so it is preferred
+    # by `NEST_ALIGN_MM` of length, and its start is moved to where that line meets the part's gap.
+    lines_x, lines_y = [], []
+    for n in sorted(fps, key=lambda k: -fps[k].area):
+        p = fps[n]
+        want = _hold_count(p)
+        ring = p.buffer(gap).exterior
+        c = np.asarray(p.centroid.coords[0])
+        starts = [ring.interpolate(t) for t in np.linspace(0.0, ring.length, max(int(ring.length), 16),
+                                                            endpoint=False)]
+        x0, y0, x1, y1 = ring.bounds
+        for lx in lines_x:
+            if x0 < lx < x1:
+                hit = ring.intersection(LineString([(lx, y0 - 1.0), (lx, y1 + 1.0)]))
+                starts += [q for q in getattr(hit, "geoms", [hit]) if q.geom_type == "Point"]
+        for ly in lines_y:
+            if y0 < ly < y1:
+                hit = ring.intersection(LineString([(x0 - 1.0, ly), (x1 + 1.0, ly)]))
+                starts += [q for q in getattr(hit, "geoms", [hit]) if q.geom_type == "Point"]
+
+        def lined_up(a, way):
+            if way[0] == 0:
+                return any(abs(a.x - lx) < 0.6 for lx in lines_x)
+            return any(abs(a.y - ly) < 0.6 for ly in lines_y)
+        cands = []
+        for a in starts:
+            for d, band, way in straight(a, n, net):
+                cands.append((d - (NEST_ALIGN_MM if band is not None and lined_up(a, way) else 0.0), a, band, way))
+        cands.sort(key=lambda x: x[0])
+        need = HOLD_SPREAD_DEG if want == 2 else 360.0 / (want + 1)
+        chosen = []
+
+        def angle(a):
+            return float(np.degrees(np.arctan2(a.y - c[1], a.x - c[0])))
+
+        def apart(a):
+            return all(abs((angle(a) - angle(b) + 180.0) % 360.0 - 180.0) >= need * 0.9
+                       and a.distance(b) >= sprue.MIN_GATE_SEP for b, _band in chosen)
+        for d, a, band, way in cands:
+            if apart(a):
+                chosen.append((a, band))
+                if band is not None:
+                    (lines_x if way[0] == 0 else lines_y).append(a.x if way[0] == 0 else a.y)
+            if len(chosen) >= want:
+                break
+        if len(chosen) < want:
+            # the sides no straight runner reaches get an L, where one fits
+            for a in starts[::3]:
+                if len(chosen) >= want:
+                    break
+                if not apart(a):
+                    continue
+                got = l_shaped(a, n, net)
+                if got is not None:
+                    chosen.append((a, got[1]))
+        if len(chosen) < 2:
+            # A part boxed in by its neighbours, with no way out along an axis, gets a runner at 45
+            # degrees, and failing that the shortest straight runner at any angle. A part left
+            # unattached prints as a loose piece that drops off the card.
+            more = []
+            for a in starts:
+                for d, band, _way in straight(a, n, net, diagonals):
+                    more.append((d, a, band))
+                got = nearest(a, n, net)
+                if got is not None:
+                    more.append((got[0], a, got[1]))
+            more.sort(key=lambda x: x[0])
+            for d, a, band in more:
+                if apart(a):
+                    chosen.append((a, band))
+                if len(chosen) >= want:
+                    break
+        bands = [b for _a, b in chosen if b is not None]
+        if bands:
+            net = unary_union([net] + bands)
+        holds[n] = [(float(a.x), float(a.y)) for a, _b in chosen]
+        widest = max((abs((angle(a1) - angle(a2) + 180.0) % 360.0 - 180.0)
+                      for i, (a1, _b1) in enumerate(chosen) for a2, _b2 in chosen[i + 1:]), default=0.0)
+        if len(chosen) < 2 or widest < HOLD_SPREAD_DEG * 0.9:
+            weak.append(n)
+    return net, holds, weak
+
+
+def name_plate(text, W, H, frame_w=NEST_FRAME_W, height=FRAME_T):
+    """A plate along the top edge with `text` standing on it, as kit cards carry their name:
+    (plate shape, text solids). The text is `PLATE_TEXT_H` tall and stands `MARK_DEPTH` proud."""
+    from shapely import affinity
+    g = _glyphs(text, PLATE_TEXT_H * 1.38)
+    if g is None or g.is_empty:
+        return None, []
+    x0, y0, x1, y1 = g.bounds
+    w = (x1 - x0) + 8.0
+    plate = shapely_box(W / 2.0 - w / 2.0, H - frame_w - PLATE_H + 1.0, W / 2.0 + w / 2.0, H - frame_w / 2.0)
+    g = affinity.translate(g, W / 2.0 - (x0 + x1) / 2.0,
+                           (plate.bounds[1] + plate.bounds[3]) / 2.0 - (y0 + y1) / 2.0)
+    pieces = g.geoms if g.geom_type == "MultiPolygon" else [g]
+    solids = [trimesh.creation.extrude_polygon(q, MARK_DEPTH + MARK_SINK,
+                                               transform=trimesh.transformations.translation_matrix(
+                                                   [0.0, 0.0, height - MARK_SINK]))
+              for q in pieces]
+    return plate, solids
+
+
+def number_tags(placed, numbers, network, shape=None, gap=NEST_GAP, z=FRAME_T, reach=10.0):
+    """`_number_tags`, and for any part left without a tag, a second try at four times the reach."""
+    out, missing = _number_tags(placed, numbers, network, shape, gap, z, reach)
+    if missing:
+        taken = [plate for plate, _s in out.values()]
+        more, missing = _number_tags(placed, {n: numbers[n] for n in missing}, network, shape, gap, z,
+                                     reach * 4.0, taken=taken)
+        out.update(more)
+    return out, missing
+
+
+def _number_tags(placed, numbers, network, shape=None, gap=NEST_GAP, z=FRAME_T, reach=10.0, taken=()):
+    """A number tag for each part: a small plate on or beside a runner near the part, with the part's
+    number standing on it, as on a moulded frame (whose square tags sit at runner junctions). A tag
+    keeps the gap from every part, joins the runners, stays inside `shape` (the card's outline) when
+    it is given, and sits as near its own part as it can, within `reach` mm. Returns
+    ({name: (plate, stamp)}, missing). Plates are 2D shapes, stamps are solids, and `missing` names
+    parts that found no room.
+    """
+    from shapely.ops import unary_union
+    fps = {n: _outline(m) for n, m in placed.items()}
+    strict = unary_union([p.buffer(gap * 0.95) for p in fps.values()])
+    out, missing = {}, []
+    taken = [t.buffer(0.6) for t in taken]
+    # the parts with the least room round them choose first
+    room = {n: network.intersection(fps[n].buffer(gap + reach)).area for n in numbers}
+    for n, i in sorted(numbers.items(), key=lambda kv: (room.get(kv[0], 0.0), kv[1])):
+        stamp = number_stamp(str(i), [0.0, 0.0, z - MARK_SINK], depth=MARK_DEPTH + MARK_SINK)
+        if stamp is None:
+            missing.append(n)
+            continue
+        sx, sy = (stamp.bounds[1] - stamp.bounds[0])[:2]
+        tw, th = sx + 1.6, sy + 1.6
+        near = network.intersection(fps[n].buffer(gap + reach))
+        spots = []
+        # on the runners near the part, and in the open just beside it
+        for g in ([near] if near.geom_type == "Polygon" else list(getattr(near, "geoms", []))):
+            if g.is_empty or g.geom_type != "Polygon":
+                continue
+            line = g.exterior
+            spots += [np.asarray(line.interpolate(t).coords[0])
+                      for t in np.linspace(0.0, line.length, max(int(line.length / 0.8), 4), endpoint=False)]
+        for k in (0.5, 2.0, 4.0):
+            ring = fps[n].buffer(gap + tw / 2.0 + k).exterior
+            spots += [np.asarray(ring.interpolate(t).coords[0])
+                      for t in np.linspace(0.0, ring.length, max(int(ring.length), 12), endpoint=False)]
+        best = None
+        for q in spots:
+            plate = shapely_box(q[0] - tw / 2, q[1] - th / 2, q[0] + tw / 2, q[1] + th / 2)
+            if plate.intersects(strict) or any(plate.intersects(o) for o in taken):
+                continue
+            if plate.intersection(network).area < 1.0 or (shape is not None and not shape.contains(plate)):
+                continue
+            score = plate.distance(fps[n]) + 0.05 * (q[1] - float(fps[n].bounds[1]))
+            if shape is not None and plate.intersects(shape.exterior.buffer(NEST_FRAME_W + 0.5)):
+                score += 6.0          # a tag on the outer frame reads as the card's, not the part's
+            if best is None or score < best[0]:
+                best = (score, plate, q)
+        if best is None:
+            missing.append(n)
+            continue
+        _s, plate, q = best
+        taken.append(plate.buffer(0.6))
+        stamp.apply_translation([q[0] - (stamp.bounds[0][0] + stamp.bounds[1][0]) / 2.0,
+                                 q[1] - (stamp.bounds[0][1] + stamp.bounds[1][1]) / 2.0, 0.0])
+        out[n] = (plate, stamp)
+    return out, missing
+
+
+def _gates_at(part, frame_mesh, aims, keep_out=()):
+    """One gate at each aim point (x, y): from the part's material nearest to it, low enough to stay
+    at frame level, clear of the joints and at least `sprue.MIN_GATE_SEP` from the other gates."""
+    pts = _surface_points(part, 4000, seed=11)
+    low = pts[pts[:, 2] <= GATE_H * 1.6]
+    picked = []
+    for x, y in aims:
+        if not len(low):
+            break
+        order = np.argsort(np.hypot(low[:, 0] - x, low[:, 1] - y))
+        for i in order[:400]:
+            a = np.asarray(low[i], float)
+            if any(np.linalg.norm(a[:2] - q[:2]) < sprue.MIN_GATE_SEP for q in picked):
+                continue
+            if any(float(np.linalg.norm(a - k)) < r for k, r in keep_out):
+                continue
+            picked.append(a)
+            break
+    return _gates_from(picked, frame_mesh)
 
 
 def cross_bars(placed, h_centres, W, H, pitch=BAR_PITCH):
@@ -999,7 +1362,7 @@ def lay_out(parts, inner_w=200.0):
 # centre of mass projects inside its contact footprint) does not need one, so it is off by default.
 def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True, seat=True,
           anatomical=True, source=None, base_for=None, rows=None, down=None, across=None, bed=None,
-          upright=None, cross=False):
+          upright=None, cross=False, nest=False, nest_width=100.0, plate=None):
     # the parts, the joints between them and the notes come from the caller's source
     if source is None:
         raise ValueError("build() needs source=: a callable returning (parts, made, notes)")
@@ -1024,9 +1387,28 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
     # The reading-order layout is the default, because a kit that can be assembled without
     # instructions is worth more than a slightly denser pack.
     own_bars = None
-    packed = lay_out_packed(parts, inner_w) if (pack and not anatomical) else None
+    # A nested card fits the parts by their outlines (`nest_outlines`) and holds each with thin
+    # runners from several sides (`web_runners`), instead of rows over bars.
+    packed = lay_out_packed(parts, inner_w) if (pack and not anatomical and not nest) else None
     used_pack = packed is not None
-    if packed is not None:
+    if nest:
+        # A part the runners cannot hold from two sides gets more room and the nest is laid again,
+        # until every part is held or the tries run out (then the build says which parts are weak).
+        room = {}
+        for _try in range(4):
+            placed, moved, (W, H) = nest_outlines(parts, nest_width, top=PLATE_H if plate else 0.0,
+                                                  corridor=dict(room))
+            plate_poly, plate_text = name_plate(plate, W, H) if plate else (None, [])
+            net, holds, weak = web_runners(placed, W, H, extra=plate_poly)
+            if not weak:
+                break
+            for n in weak:
+                room[n] = room.get(n, NEST_CORRIDOR) + 1.5
+        if room:
+            notes.append(f"nest laid {_try + 1} times, more room round {', '.join(sorted(room))}")
+        shapes = {n: footprint(m) for n, m in placed.items()}
+        at = None
+    elif packed is not None:
         placed, shapes, (W, H), at, moved = packed
     elif anatomical:
         # Reading orientation. The caller names parts to stand the way they sit on the model, each
@@ -1063,7 +1445,26 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
     bars = own_bars if own_bars is not None else [
         FRAME_W + y + GAP / 2 - BAR_BACK for y in shelf_ys]
 
-    frame = [trimesh.creation.box(extents=[W, FRAME_W, FRAME_T],
+    # Part numbers go on the runner, as on a model kit, so nothing is left on a piece after it is
+    # snipped. Numbering is alphabetical by part name, so it does not change between builds.
+    order = sorted(shapes)
+    numbers = {n: i + 1 for i, n in enumerate(order)}
+    if not nest:
+        holds, weak = {}, []
+    if nest:
+        from shapely.ops import unary_union
+        outer = shapely_box(0.0, 0.0, W, H).buffer(-NEST_CORNER).buffer(NEST_CORNER)
+        tags, untagged = number_tags(placed, numbers, net, shape=outer)
+        flat = unary_union([net] + [q for q, _s in tags.values()])
+        polys = flat.geoms if flat.geom_type == "MultiPolygon" else [flat]
+        frame = [trimesh.creation.extrude_polygon(q, FRAME_T) for q in polys if q.area > 1e-3]
+        frame += plate_text + [s_ for _q, s_ in tags.values()]
+        if weak:
+            notes.append(f"held at fewer than two points, or not from two sides: {', '.join(weak)}")
+        if untagged:
+            notes.append(f"no room for a number tag beside: {', '.join(untagged)}")
+        bars = []
+    frame = frame if nest else [trimesh.creation.box(extents=[W, FRAME_W, FRAME_T],
                                   transform=trimesh.transformations.translation_matrix(
                                       [W / 2, FRAME_W / 2, FRAME_T / 2])),
              trimesh.creation.box(extents=[W, FRAME_W, FRAME_T],
@@ -1078,7 +1479,7 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
     # Tangent is not joined. A bar spanning exactly from one rail's inner face to the other's
     # touches them without overlapping, so each bar unions into a separate body. The bars run the
     # full width so they overlap both rails.
-    for by in bars:
+    for by in ([] if nest else bars):
         frame.append(trimesh.creation.box(
             extents=[W, BAR_W, FRAME_T],
             transform=trimesh.transformations.translation_matrix(
@@ -1088,19 +1489,16 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
     # than one side. Each segment overlaps the two horizontal lines it runs between, so it unions
     # into the one frame body rather than floating. `cross_bars` has refused any column that a part
     # sits in, so none of these fuses a part to the frame.
-    if cross and anatomical:
+    if cross and anatomical and not nest:
         for x, y0, y1 in cross_bars(placed, bars, W, H):
             frame.append(trimesh.creation.box(
                 extents=[BAR_W, y1 - y0, FRAME_T],
                 transform=trimesh.transformations.translation_matrix(
                     [x, (y0 + y1) / 2.0, FRAME_T / 2])))
 
-    # Part numbers go on the runner, as on a model kit. They are stamped on the frame rather than
-    # on the part, so nothing is left on a piece after it is snipped. Numbering is alphabetical by
-    # part name, so it does not change between builds.
-    order = sorted(shapes)
-    numbers = {n: i + 1 for i, n in enumerate(order)}
-    for n, i in numbers.items():
+    # On a bar frame the number is stamped on the bar under its part. A nested card carries its own
+    # number tags (`number_tags`).
+    for n, i in ({} if nest else numbers).items():
         # With a branching runner there may be no bars to be nearest to. This is only used to
         # place the number (`_gates_for` aims at the frame mesh by geometry), so it is optional.
         lowest, xlo, xhi = low_edge(placed[n])
@@ -1157,8 +1555,10 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
             nh = np.asarray(nn, float) @ _home[:3, :3].T
             nh = nh / np.maximum(np.linalg.norm(nh, axis=1, keepdims=True), 1e-9)
             return visibility(_scene, ph, nh)
-        for g, span, ends in _gates_for(placed[n], frame_mesh, keep_out=keep_out,
-                                        seen=_seen if _scene is not None else None):
+        made_gates = (_gates_at(placed[n], frame_mesh, holds.get(n, []), keep_out=keep_out) if nest
+                      else _gates_for(placed[n], frame_mesh, keep_out=keep_out,
+                                      seen=_seen if _scene is not None else None))
+        for g, span, ends in made_gates:
             gate_solids.append(g)
             gate_axes.append(ends)
             gates.append((n,) + span)
@@ -1230,6 +1630,8 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
             "size": (W, H, tall), "fits_bed": bool(fits), "bodies": bodies,
             "first_layer_mm2": float(first_layer),
             "notes": notes, "joints": made, "orient": orient_log, "seat": seat_log,
+            # a nested card's hold points per part, and the parts held from fewer than two sides
+            "holds": holds, "weak": weak,
             # The layout's own record of where each part went, kept by `_slide`. Re-deriving the
             # move from a placed part's corner, and detecting a spin by comparing bounding-box
             # extents, fails for a part with a round footprint: a spun disc has the same extents,
