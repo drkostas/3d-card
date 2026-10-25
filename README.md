@@ -66,6 +66,15 @@ tosprue.build(source=source, rows=rows,
               cross=True)
 ```
 
+### A nested card
+
+Most printed kit cards fit the parts close together inside a thin frame, with thin runners running through the gaps. `nest=True` builds that kind of card. The parts are fitted by their real outlines, every part is held by two to four runners from different sides, and each runner end has a gate. `plate` puts a name along the top.
+
+```python
+got, report = tosprue.best_card(source=source, nest=True, nest_width=100.0, plate="ROBOT")
+print(got["holds"], got["weak"])      # the hold points per part, and any part held from one side only
+```
+
 ### Joints
 
 `card3d.joints` makes the two halves of a joint (`male` is what sticks out, `female` is what is cut away) for pegs, axles, pivots, ball joints, tabs and cross laps. The clearances were measured on a real printer with the two test prints in `card3d.coupons` (0.30 mm for push fits, 0.20 mm for a pivot that holds its pose). Print the coupons on your own printer and change `joints.CLEAR` and `joints.PIVOT_CLEAR` if yours differ.

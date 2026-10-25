@@ -114,6 +114,8 @@ got, report = tosprue.best_card(
 got["card"].export("card.stl")
 ```
 
+A nested card (`nest=True`, with `nest_width` for the inside width and `plate` for a name) fits the parts by their real outlines instead of rows, and holds every part with thin straight runners from two to four sides, one gate at each runner end. A part held at one point can pivot on its gate and snap it in handling, so `weak` must be empty: a part the runners cannot reach from two sides gets more room and the nest is laid again. Measured on moulded frames, the parts take 26 to 34 percent of the frame. A nest of rounded parts reaches about 30, rows over bars about 11.
+
 `best_card` builds, runs the round trip, and accepts a card only when the round trip holds, the card is one body, and its first layer is at least 2000 mm2. A card whose parts were never attached passes a round trip, so the body count is part of the test. To also try the dense MaxRects layout with a routed runner, pass `anatomical=False`, otherwise both of its attempts use the reading-order layout. `export(out="card", name="card.stl", **kw)` builds once and writes the file.
 
 What `build` does, and the numbers behind it.
