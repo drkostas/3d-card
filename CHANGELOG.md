@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The numbers stamped on a card follow the reading order given in `rows` (top row first, then left to right), also on a nested card, whose layout has no rows. Parts no row names come after, in alphabetical order. Before, the numbers were alphabetical whatever `rows` said.
 - A nested card keeps each part named in `upright` at its reading turn (a head face up, a limb hanging) unless another quarter turn sits more than `NEST_UPRIGHT_SLACK` (5 mm) lower in the nest. `nest_outlines` takes it as `prefer`, a turn per part.
 - `build(nest=True)` makes a nested card, the way most printed kit cards are drawn. `nest_outlines` fits the parts close by their real outlines, each tried in four quarter turns, inside a thin frame with round corners. `web_runners` holds every part with two to four thin straight runners from different sides (a straight runner along an axis where one fits, an L of two where a part is boxed in, a 45 degree or shortest runner as the last resort), so the card can be shaken and nothing swings or drops. A part that cannot be held from two sides gets more room and the nest is laid again. Each runner end carries a gate (`_gates_at`), and the result reports `holds` and `weak`.
 - `build(plate="NAME")` puts the name on a plate along the top edge of a nested card (`name_plate`).

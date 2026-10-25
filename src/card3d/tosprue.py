@@ -1468,8 +1468,12 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
         FRAME_W + y + GAP / 2 - BAR_BACK for y in shelf_ys]
 
     # Part numbers go on the runner, as on a model kit, so nothing is left on a piece after it is
-    # snipped. Numbering is alphabetical by part name, so it does not change between builds.
-    order = sorted(shapes)
+    # snipped. They follow the reading order given in `rows` (top row first, then left to right),
+    # so a nested card, whose layout has no rows, is still numbered in that order. Parts no row
+    # names come after, in alphabetical order. Both depend only on the names, so the numbers do
+    # not change between builds.
+    reading = [n for row in (ANATOMY if rows is None else rows) for n in row if n in shapes]
+    order = list(dict.fromkeys(reading)) + sorted(n for n in shapes if n not in reading)
     numbers = {n: i + 1 for i, n in enumerate(order)}
     if not nest:
         holds, weak = {}, []
