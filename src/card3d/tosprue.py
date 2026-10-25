@@ -949,6 +949,7 @@ NEST_FRAME_W = 2.5       # the outer frame
 NEST_CORNER = 3.0        # its corner radius
 NEST_CORRIDOR = NEST_GAP + NEST_RUNNER_W / 2.0 + 0.5   # what each part keeps clear round it in the nest
 NEST_STEP = 0.5          # the nest's raster, in mm
+NEST_UPRIGHT_SLACK = 5.0  # how much lower in the nest a part may sit to keep reading the right way up
 PLATE_H = 9.0            # a name plate along the top edge, when the card has a name
 PLATE_TEXT_H = 6.5
 HOLDS = ((20.0, 2), (40.0, 3), (float("inf"), 4))   # how many runners hold a part, by its size
@@ -961,7 +962,7 @@ def _outline(mesh):
 
 
 def nest_outlines(parts, width=100.0, corridor=NEST_CORRIDOR, step=NEST_STEP, frame_w=NEST_FRAME_W,
-                  top=0.0):
+                  top=0.0, prefer=None, slack=None):
     """Fit the parts close by their real outlines: (placed, moved, (W, H)).
 
     Largest first, each tried in four quarter turns about Z, at the lowest place where its outline,
@@ -970,7 +971,13 @@ def nest_outlines(parts, width=100.0, corridor=NEST_CORRIDOR, step=NEST_STEP, fr
     the inside of the frame. `top` reserves room along the top edge (a name plate). `corridor` may
     be a mapping of part name to its own corridor, for a part that needs more room round it. A turn
     about Z keeps the face each part rests on, so it changes nothing about how it prints.
+
+    `prefer` maps a part to the turn (radians about Z) at which it reads the way it sits on the model
+    (from `_spin_flat`). That turn is kept unless another quarter turn sits more than `slack` mm
+    (`NEST_UPRIGHT_SLACK`) lower in the nest, so a head reads face up wherever the space allows.
     """
+    prefer = prefer or {}
+    slack_rows = (NEST_UPRIGHT_SLACK if slack is None else float(slack)) / step
     from scipy.signal import fftconvolve
     from shapely import contains_xy
     cols = int(width / step)
@@ -979,10 +986,11 @@ def nest_outlines(parts, width=100.0, corridor=NEST_CORRIDOR, step=NEST_STEP, fr
     order = sorted(parts, key=lambda n: -_outline(parts[n]).area)
     for n in order:
         m0 = parts[n]
-        best = None
+        best, first = None, None
+        base = float(prefer.get(n, 0.0))
         for k in range(4):
             c = m0.bounds.mean(axis=0)
-            R = trimesh.transformations.rotation_matrix(k * np.pi / 2, [0, 0, 1], c)
+            R = trimesh.transformations.rotation_matrix(base + k * np.pi / 2, [0, 0, 1], c)
             m = m0.copy()
             m.apply_transform(R)
             fp = _outline(m).buffer(corridor.get(n, NEST_CORRIDOR) if isinstance(corridor, dict) else corridor)
@@ -1001,8 +1009,13 @@ def nest_outlines(parts, width=100.0, corridor=NEST_CORRIDOR, step=NEST_STEP, fr
             tops = free[:, 0] + h
             i = np.lexsort((free[:, 1], tops))[0]
             key = (int(tops[i]), int(free[i][1]))
+            got = (key, int(free[i][0]), int(free[i][1]), R, m, mask, x0, y0)
+            if k == 0:
+                first = got
             if best is None or key < best[0]:
-                best = (key, int(free[i][0]), int(free[i][1]), R, m, mask, x0, y0)
+                best = got
+        if n in prefer and first is not None and first[0][0] - best[0][0] <= slack_rows:
+            best = first                       # it reads the right way up, at little or no cost
         if best is None:
             raise ValueError(f"nest_outlines: {n} does not fit a card {width} mm wide")
         _key, r, cc, R, m, mask, x0, y0 = best
@@ -1394,10 +1407,19 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
     if nest:
         # A part the runners cannot hold from two sides gets more room and the nest is laid again,
         # until every part is held or the tries run out (then the build says which parts are weak).
+        # Each part named in `upright` is offered its reading turn first (`_spin_flat`), so the nest
+        # keeps a head face up and a limb hanging wherever that costs little space.
+        reads = {}
+        if upright:
+            seat_rot = {r["part"]: np.asarray(r["matrix"], float)[:3, :3] for r in seat_log}
+            for n, mode in upright.items():
+                if n in parts:
+                    ref = seat_rot.get(n, np.eye(3)) @ np.array([0.0, 0.0, 1.0])
+                    reads[n] = float(_spin_flat(parts[n], (mode, ref))[1])
         room = {}
         for _try in range(4):
             placed, moved, (W, H) = nest_outlines(parts, nest_width, top=PLATE_H if plate else 0.0,
-                                                  corridor=dict(room))
+                                                  corridor=dict(room), prefer=reads)
             plate_poly, plate_text = name_plate(plate, W, H) if plate else (None, [])
             net, holds, weak = web_runners(placed, W, H, extra=plate_poly)
             if not weak:

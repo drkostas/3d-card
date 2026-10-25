@@ -203,3 +203,13 @@ def test_a_named_card_carries_its_name(kit):
     plain = T.build(verbose=False, source=kit, nest=True, nest_width=60.0)
     named = T.build(verbose=False, source=kit, nest=True, nest_width=60.0, plate="KIT")
     assert named["card"].volume > plain["card"].volume and named["bodies"] == 1
+
+
+def test_the_nest_keeps_a_part_reading_the_right_way_when_it_costs_nothing(kit):
+    parts, _made, _notes = kit()
+    # the wheel is round, so any turn packs the same: the preferred one must win
+    want = 0.7
+    placed, moved, _size = T.nest_outlines(parts, 80.0, prefer={"wheel": want})
+    R = np.asarray(moved["wheel"], float)[:3, :3]
+    got = float(np.arctan2(R[1, 0], R[0, 0]))
+    assert abs((got - want + np.pi) % (2 * np.pi) - np.pi) < 1e-6
