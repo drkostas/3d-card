@@ -102,13 +102,29 @@ def footprint(mesh):
     A thin slice near the frame is not a footprint. A tilted part can be small at the bottom and
     lean far out higher up, so nesting by a low slice lets it hang over its neighbours and the
     frame. What must not overlap is the whole part.
+
+    The shadow is the union of the part's upward-facing triangles, merged on a 0.001 mm grid.
+    Merged exactly (`trimesh.path.polygons.projected`), the many near-degenerate triangles a boolean
+    leaves can stop GEOS with a topology error, or come back as a few broken pieces, and a bounding
+    box was used instead. That box is up to three times the part's real shadow (a C-shaped clip, a
+    board lying on its side), so a nest packed round it wasted the room the outline was meant to save.
     """
     try:
-        g = trimesh.path.polygons.projected(mesh, normal=[0.0, 0.0, 1.0])
-        if g is not None and not g.is_empty:
+        import shapely
+        tri = np.asarray(mesh.triangles)[:, :, :2]
+        tri = tri[np.asarray(mesh.face_normals)[:, 2] > 1e-9]
+        e1, e2 = tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]
+        tri = tri[np.abs(e1[:, 0] * e2[:, 1] - e2[:, 0] * e1[:, 1]) > 2e-9]
+        if len(tri):
+            g = shapely.union_all(shapely.polygons(np.concatenate([tri, tri[:, :1]], axis=1)),
+                                  grid_size=1e-3)
+            if g.geom_type == "MultiPolygon":
+                # hairline gaps the grid left between triangles, closed so no real piece is dropped
+                g = g.buffer(0.05).buffer(-0.05)
             if g.geom_type == "MultiPolygon":
                 g = max(g.geoms, key=lambda q: q.area)
-            return np.asarray(g.exterior.coords)[:-1]
+            if g.geom_type == "Polygon" and not g.is_empty:
+                return np.asarray(g.exterior.coords)[:-1]
     except Exception:
         pass
     b = mesh.bounds
@@ -949,7 +965,11 @@ NEST_FRAME_W = 2.5       # the outer frame
 NEST_CORNER = 3.0        # its corner radius
 NEST_CORRIDOR = NEST_GAP + NEST_RUNNER_W / 2.0 + 0.5   # what each part keeps clear round it in the nest
 NEST_STEP = 0.5          # the nest's raster, in mm
-NEST_UPRIGHT_SLACK = 5.0  # how much lower in the nest a part may sit to keep reading the right way up
+NEST_UPRIGHT_SLACK = 10.0  # how much lower in the nest a part may sit to keep reading the right way up
+NEST_TAG_OWN = 2.0       # how much nearer its own part than any other a number tag must sit, in mm
+NEST_TAG_APART = 3.0     # the least gap between two number tags, so two numbers never read as one
+NEST_TRIES = 6           # how many times the nest is laid again with more room round crowded parts
+NEST_TAG_STUB = 8.0      # the longest stub that may carry a number tag out to open space beside its part
 PLATE_H = 9.0            # a name plate along the top edge, when the card has a name
 PLATE_TEXT_H = 6.5
 HOLDS = ((20.0, 2), (40.0, 3), (float("inf"), 4))   # how many runners hold a part, by its size
@@ -1221,29 +1241,100 @@ def name_plate(text, W, H, frame_w=NEST_FRAME_W, height=FRAME_T):
 
 
 def number_tags(placed, numbers, network, shape=None, gap=NEST_GAP, z=FRAME_T, reach=10.0):
-    """`_number_tags`, and for any part left without a tag, a second try at four times the reach."""
-    out, missing = _number_tags(placed, numbers, network, shape, gap, z, reach)
-    if missing:
+    """`_number_tags`, and for any part left without a tag, a second try at four times the reach.
+
+    A tag must sit at least `NEST_TAG_OWN` nearer its own part than any other, so the number cannot
+    send a reader to the wrong part. Only a part that finds no such place within four times the
+    reach gets a tag without that rule, as near its own part as there is room for.
+    """
+    out, missing = {}, list(numbers)
+    for r, own in ((reach, NEST_TAG_OWN), (reach * 4.0, NEST_TAG_OWN), (reach * 4.0, None)):
+        if not missing:
+            break
         taken = [plate for plate, _s in out.values()]
         more, missing = _number_tags(placed, {n: numbers[n] for n in missing}, network, shape, gap, z,
-                                     reach * 4.0, taken=taken)
+                                     r, taken=taken, own=own)
         out.update(more)
     return out, missing
 
 
-def _number_tags(placed, numbers, network, shape=None, gap=NEST_GAP, z=FRAME_T, reach=10.0, taken=()):
+def reading_numbers(names, rows=None):
+    """The number of each part: {name: number}, from 1.
+
+    They follow the reading order in `rows` (top row first, then left to right), so a nested card,
+    whose layout has no rows, is still numbered in that order. Parts no row names come after, in
+    alphabetical order. Both depend only on the names, so the numbers do not change between builds.
+    """
+    names = list(names)
+    reading = [n for row in (ANATOMY if rows is None else rows) for n in row if n in names]
+    order = list(dict.fromkeys(reading)) + sorted(n for n in names if n not in reading)
+    return {n: i + 1 for i, n in enumerate(order)}
+
+
+def off_reading(moved, reads):
+    """The parts not lying at their reading turn: [name], from the nest's `moved` matrices and the
+    turn (radians about Z) each part reads at (`build`'s `reads`)."""
+    out = []
+    for n, want in sorted(reads.items()):
+        if n not in moved:
+            continue
+        R = np.asarray(moved[n], float)[:3, :3]
+        got = float(np.arctan2(R[1, 0], R[0, 0]))
+        if abs((got - want + np.pi) % (2 * np.pi) - np.pi) > 1e-3:
+            out.append(n)
+    return out
+
+
+def _tag_box(stamp):
+    """The plate a number stands on, [x0, y0, x1, y1]: the stamp's outline and 0.8 mm round it."""
+    lo, hi = np.asarray(stamp.bounds, float)[:, :2]
+    return [float(lo[0]) - 0.8, float(lo[1]) - 0.8, float(hi[0]) + 0.8, float(hi[1]) + 0.8]
+
+
+def _unclear_tags(tags, placed):
+    return [n for n, (a, b, _w) in tag_clearance(
+        {n: _tag_box(s) for n, (_q, s) in tags.items()}, placed).items() if a + NEST_TAG_OWN > b]
+
+
+def tag_clearance(tags, placed):
+    """How clearly each number tag belongs to its own part: {name: (own_mm, other_mm, other_name)}.
+
+    `tags` is `build`'s {name: [x0, y0, x1, y1]} and `placed` its parts, in the same frame. `own_mm`
+    is the gap from the tag to its own part's outline, `other_mm` the gap to the nearest other part,
+    which is `other_name`. A tag reads as its own part's when `own_mm + NEST_TAG_OWN <= other_mm`.
+    """
+    fps = {n: _outline(m) for n, m in placed.items()}
+    out = {}
+    for n, b in tags.items():
+        if n not in fps:
+            continue
+        plate = shapely_box(*b)
+        rest = sorted((plate.distance(p), m) for m, p in fps.items() if m != n)
+        other, who = rest[0] if rest else (float("inf"), None)
+        out[n] = (float(plate.distance(fps[n])), float(other), who)
+    return out
+
+
+def _number_tags(placed, numbers, network, shape=None, gap=NEST_GAP, z=FRAME_T, reach=10.0, taken=(),
+                 own=None):
     """A number tag for each part: a small plate on or beside a runner near the part, with the part's
     number standing on it, as on a moulded frame (whose square tags sit at runner junctions). A tag
     keeps the gap from every part, joins the runners, stays inside `shape` (the card's outline) when
-    it is given, and sits as near its own part as it can, within `reach` mm. Returns
-    ({name: (plate, stamp)}, missing). Plates are 2D shapes, stamps are solids, and `missing` names
-    parts that found no room.
+    it is given, and sits as near its own part as it can, within `reach` mm. With `own` set, a place
+    is used only when it is at least `own` mm nearer the tag's own part than any other part. When no
+    place on the runners passes, the tag may stand in the open beside its part on a stub of runner
+    at most `NEST_TAG_STUB` long, as number tags on moulded frames often do. Returns
+    ({name: (plate, stamp)}, missing). Plates are 2D shapes (with the stub when there is one),
+    stamps are solids, and `missing` names parts that found no room.
     """
-    from shapely.ops import unary_union
+    from shapely.geometry import LineString
+    from shapely.ops import nearest_points, unary_union
     fps = {n: _outline(m) for n, m in placed.items()}
     strict = unary_union([p.buffer(gap * 0.95) for p in fps.values()])
+    others = {n: (unary_union([p for m, p in fps.items() if m != n]) if len(fps) > 1 else None)
+              for n in numbers} if own is not None else {}
     out, missing = {}, []
-    taken = [t.buffer(0.6) for t in taken]
+    taken = [t.buffer(NEST_TAG_APART) for t in taken]
     # the parts with the least room round them choose first
     room = {n: network.intersection(fps[n].buffer(gap + reach)).area for n in numbers}
     for n, i in sorted(numbers.items(), key=lambda kv: (room.get(kv[0], 0.0), kv[1])):
@@ -1273,16 +1364,42 @@ def _number_tags(placed, numbers, network, shape=None, gap=NEST_GAP, z=FRAME_T, 
                 continue
             if plate.intersection(network).area < 1.0 or (shape is not None and not shape.contains(plate)):
                 continue
+            if own is not None and others[n] is not None and \
+                    plate.distance(fps[n]) + own > plate.distance(others[n]):
+                continue
             score = plate.distance(fps[n]) + 0.05 * (q[1] - float(fps[n].bounds[1]))
             if shape is not None and plate.intersects(shape.exterior.buffer(NEST_FRAME_W + 0.5)):
                 score += 6.0          # a tag on the outer frame reads as the card's, not the part's
             if best is None or score < best[0]:
                 best = (score, plate, q)
+        if best is None and own is not None and others[n] is not None:
+            # out in the open beside the part, joined to the nearest runner by a short stub
+            for k in (1.0, 3.0, 5.0):
+                ring = fps[n].buffer(gap + max(tw, th) / 2.0 + k).exterior
+                for t in np.linspace(0.0, ring.length, max(int(ring.length), 12), endpoint=False):
+                    q = np.asarray(ring.interpolate(t).coords[0])
+                    plate = shapely_box(q[0] - tw / 2, q[1] - th / 2, q[0] + tw / 2, q[1] + th / 2)
+                    if plate.intersects(strict) or any(plate.intersects(o) for o in taken):
+                        continue
+                    if shape is not None and not shape.contains(plate):
+                        continue
+                    if plate.distance(fps[n]) + own > plate.distance(others[n]):
+                        continue
+                    a, b = nearest_points(plate, network)
+                    length = a.distance(b)
+                    if length > NEST_TAG_STUB:
+                        continue
+                    stub = (LineString([a, b]) if length > 1e-6 else a).buffer(NEST_RUNNER_W / 2.0)
+                    if stub.intersects(strict) or any(stub.intersects(o) for o in taken):
+                        continue
+                    score = plate.distance(fps[n]) + 0.5 * length + 0.05 * (q[1] - float(fps[n].bounds[1]))
+                    if best is None or score < best[0]:
+                        best = (score, plate.union(stub), q)
         if best is None:
             missing.append(n)
             continue
         _s, plate, q = best
-        taken.append(plate.buffer(0.6))
+        taken.append(plate.buffer(NEST_TAG_APART))
         stamp.apply_translation([q[0] - (stamp.bounds[0][0] + stamp.bounds[1][0]) / 2.0,
                                  q[1] - (stamp.bounds[0][1] + stamp.bounds[1][1]) / 2.0, 0.0])
         out[n] = (plate, stamp)
@@ -1417,17 +1534,36 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
                     ref = seat_rot.get(n, np.eye(3)) @ np.array([0.0, 0.0, 1.0])
                     reads[n] = float(_spin_flat(parts[n], (mode, ref))[1])
         room = {}
-        for _try in range(4):
+        # The same goes for a part whose number tag found no place nearer it than any other part.
+        # Each try reshuffles the whole nest, so a later one can be worse; the best is kept: fewest
+        # weak parts, then fewest crowded tags, then fewest parts off their reading turn, then the
+        # shortest card.
+        numbers = reading_numbers(parts, rows)
+        tries = []
+        for _try in range(NEST_TRIES):
             placed, moved, (W, H) = nest_outlines(parts, nest_width, top=PLATE_H if plate else 0.0,
                                                   corridor=dict(room), prefer=reads)
             plate_poly, plate_text = name_plate(plate, W, H) if plate else (None, [])
             net, holds, weak = web_runners(placed, W, H, extra=plate_poly)
-            if not weak:
+            outer = shapely_box(0.0, 0.0, W, H).buffer(-NEST_CORNER).buffer(NEST_CORNER)
+            tags, untagged = number_tags(placed, numbers, net, shape=outer)
+            crowded = sorted(set(weak) | set(_unclear_tags(tags, placed)) | set(untagged))
+            tries.append(((len(weak), len(crowded), len(off_reading(moved, reads)), H, _try),
+                          (placed, moved, W, H, plate_poly, plate_text, net, holds, weak, outer, tags,
+                           untagged)))
+            if not crowded:
                 break
-            for n in weak:
+            for n in crowded:
                 room[n] = room.get(n, NEST_CORRIDOR) + 1.5
+        key, kept = min(tries, key=lambda kv: kv[0])
+        (placed, moved, W, H, plate_poly, plate_text, net, holds, weak, outer, tags, untagged) = kept
+        unread = off_reading(moved, reads)
+        if unread:
+            notes.append(f"not at their reading turn, which would cost more than {NEST_UPRIGHT_SLACK:.0f} mm "
+                         f"of nest: {', '.join(unread)}")
         if room:
-            notes.append(f"nest laid {_try + 1} times, more room round {', '.join(sorted(room))}")
+            notes.append(f"nest laid {len(tries)} times, try {key[-1] + 1} kept, more room round "
+                         f"{', '.join(sorted(room))}")
         shapes = {n: footprint(m) for n, m in placed.items()}
         at = None
     elif packed is not None:
@@ -1468,19 +1604,12 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
         FRAME_W + y + GAP / 2 - BAR_BACK for y in shelf_ys]
 
     # Part numbers go on the runner, as on a model kit, so nothing is left on a piece after it is
-    # snipped. They follow the reading order given in `rows` (top row first, then left to right),
-    # so a nested card, whose layout has no rows, is still numbered in that order. Parts no row
-    # names come after, in alphabetical order. Both depend only on the names, so the numbers do
-    # not change between builds.
-    reading = [n for row in (ANATOMY if rows is None else rows) for n in row if n in shapes]
-    order = list(dict.fromkeys(reading)) + sorted(n for n in shapes if n not in reading)
-    numbers = {n: i + 1 for i, n in enumerate(order)}
+    # snipped (`reading_numbers`). A nested card placed its tags with its runners.
     if not nest:
-        holds, weak = {}, []
+        numbers = reading_numbers(shapes, rows)
+        holds, weak, tags = {}, [], {}
     if nest:
         from shapely.ops import unary_union
-        outer = shapely_box(0.0, 0.0, W, H).buffer(-NEST_CORNER).buffer(NEST_CORNER)
-        tags, untagged = number_tags(placed, numbers, net, shape=outer)
         flat = unary_union([net] + [q for q, _s in tags.values()])
         polys = flat.geoms if flat.geom_type == "MultiPolygon" else [flat]
         frame = [trimesh.creation.extrude_polygon(q, FRAME_T) for q in polys if q.area > 1e-3]
@@ -1489,6 +1618,10 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
             notes.append(f"held at fewer than two points, or not from two sides: {', '.join(weak)}")
         if untagged:
             notes.append(f"no room for a number tag beside: {', '.join(untagged)}")
+        clear = tag_clearance({n: _tag_box(s) for n, (_q, s) in tags.items()}, placed)
+        unclear = [f"{n} (nearer {clear[n][2]})" for n in sorted(_unclear_tags(tags, placed))]
+        if unclear:
+            notes.append(f"number tag nearer another part than its own: {', '.join(unclear)}")
         bars = []
     frame = frame if nest else [trimesh.creation.box(extents=[W, FRAME_W, FRAME_T],
                                   transform=trimesh.transformations.translation_matrix(
@@ -1653,11 +1786,13 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
             print(f"  ! {x}")
     return {"card": card, "parts": placed, "gates": gates, "gate_solids": gate_solids,
             "gate_axes": gate_axes, "frame": frame_mesh, "numbers": numbers,
+            "tags": {n: [round(v, 3) for v in _tag_box(s)] for n, (_q, s) in tags.items()},
             "size": (W, H, tall), "fits_bed": bool(fits), "bodies": bodies,
             "first_layer_mm2": float(first_layer),
             "notes": notes, "joints": made, "orient": orient_log, "seat": seat_log,
             # a nested card's hold points per part, and the parts held from fewer than two sides
-            "holds": holds, "weak": weak,
+            "holds": holds, "weak": weak, "reads": reads if nest else {},
+            "off_reading": unread if nest else [],
             # The layout's own record of where each part went, kept by `_slide`. Re-deriving the
             # move from a placed part's corner, and detecting a spin by comparing bounding-box
             # extents, fails for a part with a round footprint: a spun disc has the same extents,
