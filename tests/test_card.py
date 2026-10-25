@@ -227,3 +227,72 @@ def test_the_nest_keeps_a_part_reading_the_right_way_when_it_costs_nothing(kit):
     R = np.asarray(moved["wheel"], float)[:3, :3]
     got = float(np.arctan2(R[1, 0], R[0, 0]))
     assert abs((got - want + np.pi) % (2 * np.pi) - np.pi) < 1e-6
+
+
+def test_every_number_tag_sits_nearer_its_own_part(kit):
+    got = T.build(verbose=False, source=kit, nest=True, nest_width=60.0)
+    clear = T.tag_clearance(got["tags"], got["parts"])
+    assert set(clear) == set(got["parts"])
+    for n, (own, other, who) in clear.items():
+        assert own + T.NEST_TAG_OWN <= other, (n, own, other, who)
+
+
+def test_a_tag_skips_a_runner_that_is_nearer_another_part():
+    from shapely.geometry import box
+    # part a at x 0..10, part b at x 24..34; one runner between them but nearer b, one left of a
+    a = trimesh.creation.box(bounds=[[0, 0, 0], [10, 10, 2]])
+    b = trimesh.creation.box(bounds=[[24, 0, 0], [34, 10, 2]])
+    net = box(20.2, -5, 21.8, 15).union(box(-12.1, -5, -10.5, 15))
+    out, missing = T.number_tags({"a": a, "b": b}, {"a": 1, "b": 2}, net)
+    assert not missing
+    ax = (out["a"][0].bounds[0] + out["a"][0].bounds[2]) / 2.0
+    assert ax < 0.0                                  # a's number went to the runner on its own side
+    # the old rule, nearest runner only, would have put it between the two parts
+    old, _m = T._number_tags({"a": a, "b": b}, {"a": 1}, net)
+    assert (old["a"][0].bounds[0] + old["a"][0].bounds[2]) / 2.0 > 10.0
+
+
+def test_the_footprint_is_the_real_shadow_when_the_exact_merge_fails(monkeypatch):
+    # an exact merge of a fine mesh's triangles can stop with a GEOS topology error; the shadow
+    # must still be the part's own outline, not its bounding box
+    def broken(*_a, **_k):
+        raise RuntimeError("TopologyException: side location conflict")
+    monkeypatch.setattr(trimesh.path.polygons, "projected", broken)
+    from shapely.geometry import Polygon
+    ball = trimesh.creation.icosphere(subdivisions=4, radius=8.0)
+    area = Polygon(T.footprint(ball)).area
+    assert abs(area - np.pi * 64.0) < 0.02 * np.pi * 64.0   # a circle, not the 256 mm2 box
+
+
+
+def test_no_two_number_tags_run_together(kit):
+    # two tags side by side read as one number (a 5 beside a 2 reads 52)
+    from shapely.geometry import box
+    got = T.build(verbose=False, source=kit, nest=True, nest_width=60.0)
+    plates = [box(*b) for b in got["tags"].values()]
+    for i, a in enumerate(plates):
+        for b in plates[i + 1:]:
+            assert a.distance(b) >= T.NEST_TAG_APART - 1e-6
+
+
+def test_a_tag_with_no_clear_runner_stands_on_a_stub():
+    from shapely.geometry import box
+    # one runner, nearer b than a; a's number goes out into the open beside a, on a short stub
+    a = trimesh.creation.box(bounds=[[0, 0, 0], [10, 10, 2]])
+    b = trimesh.creation.box(bounds=[[24, 0, 0], [34, 10, 2]])
+    net = box(20.2, -5, 21.8, 30)
+    out, missing = T.number_tags({"a": a, "b": b}, {"a": 1, "b": 2}, net)
+    assert not missing
+    own, other, _who = T.tag_clearance({"a": T._tag_box(out["a"][1])}, {"a": a, "b": b})["a"]
+    assert own + T.NEST_TAG_OWN <= other
+    plate, stamp = out["a"]
+    assert plate.area > box(*T._tag_box(stamp)).area + 1.0     # it carries its stub
+    assert plate.intersects(net)                               # which reaches the runner
+
+
+def test_build_says_which_parts_left_their_reading_turn(kit):
+    got = T.build(verbose=False, source=kit, nest=True, nest_width=60.0,
+                  upright={"block": "up", "rod": "long"})
+    assert set(got["reads"]) == {"block", "rod"}
+    assert got["off_reading"] == T.off_reading(
+        {n: got["moved"][n] for n in got["reads"]}, got["reads"])
