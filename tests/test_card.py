@@ -205,6 +205,20 @@ def test_a_named_card_carries_its_name(kit):
     assert named["card"].volume > plain["card"].volume and named["bodies"] == 1
 
 
+def test_the_numbers_follow_the_reading_order(kit):
+    # the stamped numbers follow `rows` on a nested card too, which has no rows of its own
+    got = T.build(verbose=False, source=kit, nest=True, nest_width=60.0,
+                  rows=[["wheel"], ["rod", "block"]])
+    assert got["numbers"] == {"wheel": 1, "rod": 2, "block": 3}
+
+
+def test_parts_no_row_names_are_numbered_after_in_alphabetical_order(kit):
+    got = T.build(verbose=False, source=kit, nest=True, nest_width=60.0, rows=[["wheel"]])
+    assert got["numbers"] == {"wheel": 1, "block": 2, "rod": 3}
+    plain = T.build(verbose=False, source=kit, nest=True, nest_width=60.0)
+    assert plain["numbers"] == {"block": 1, "rod": 2, "wheel": 3}
+
+
 def test_the_nest_keeps_a_part_reading_the_right_way_when_it_costs_nothing(kit):
     parts, _made, _notes = kit()
     # the wheel is round, so any turn packs the same: the preferred one must win
