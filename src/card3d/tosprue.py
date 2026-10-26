@@ -44,6 +44,13 @@ GAP = 2.0                # extra clear space around each part, on top of sprue.G
 BAR_BACK = 3.2           # how far the shelf bar sits behind the parts it carries
 GATE = 1.8               # the gate's width, which snips with nippers and survives the print
 GATE_H = 2.0             # how tall a gate is: it lives in the frame, never up the part
+# The gate ends in a neck where it meets the part, as on printed kit cards: Rego Kit Card's gates
+# neck to about 0.8 mm at whole layers, and a gate as thick as the part it holds is too strong and
+# tears on removal (Nakozen). The neck is where the cutter takes it, so the mark on the part is the
+# neck's small section, and the bar behind it keeps the part held.
+NECK_W = 1.0             # two lines of a 0.4 mm nozzle
+NECK_H = 0.8             # four layers of 0.2 mm
+NECK_L = 1.0             # how far the neck runs out from the part, room for the cutter's jaws
 BED = sprue.BED
 
 
@@ -331,6 +338,40 @@ def _choose(part, pts, close, dist, order, want, keep_out, fussy):
     return picked
 
 
+def _gate_solid(p0, p1):
+    """A gate from `p0` (inside the frame) to `p1` (`GATE_BITE` inside the part): a `GATE` square bar
+    from the frame that ends in a `NECK_W` by `NECK_H` neck for the last `NECK_L` before the part and
+    on into it. The neck is laid flat (its height along Z) and starts on a layer line, so it prints as
+    whole layers."""
+    from .simulator import LAYER
+    p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
+    d = p1 - p0
+    L = float(np.linalg.norm(d))
+    u = d / L
+    start = max(L - GATE_BITE - NECK_L, 0.0)          # where the neck begins, along the gate
+    bar_len = min(start + 0.2, L)                     # the bar overlaps the neck a little
+    bar = trimesh.creation.box(extents=[GATE, GATE, bar_len])
+    bar.apply_transform(trimesh.geometry.align_vectors([0.0, 0.0, 1.0], u))
+    bar.apply_translation(p0 + u * bar_len / 2.0)
+    side = np.cross(u, [0.0, 0.0, 1.0])
+    side = side / np.linalg.norm(side) if np.linalg.norm(side) > 1e-6 else np.array([1.0, 0.0, 0.0])
+    up = np.cross(side, u)
+    up = up / np.linalg.norm(up)
+    M = np.eye(4)
+    M[:3, 0], M[:3, 1], M[:3, 2] = side, up, u
+    M[:3, 3] = p0 + u * (start + (L - start) / 2.0)
+    neck = trimesh.creation.box(extents=[NECK_W, NECK_H, L - start], transform=M)
+    lo = float(neck.bounds[0][2])
+    neck.apply_translation([0.0, 0.0, max(round(lo / LAYER) * LAYER, 0.0) - lo])
+    try:
+        g = trimesh.boolean.union([bar, neck])
+        if g.is_volume:
+            return g
+    except Exception:
+        pass
+    return trimesh.util.concatenate([bar, neck])
+
+
 def _gates_from(picked, frame_mesh):
     """Build the gate solids for the chosen points."""
     out = []
@@ -344,11 +385,7 @@ def _gates_from(picked, frame_mesh):
         u = d / L
         p0 = b - u * GATE_ROOT
         p1 = a + u * GATE_BITE
-        length = float(np.linalg.norm(p1 - p0))
-        u2 = (p1 - p0) / length
-        g = trimesh.creation.box(extents=[GATE, GATE, length])
-        g.apply_transform(trimesh.geometry.align_vectors([0.0, 0.0, 1.0], u2))
-        g.apply_translation((p0 + p1) / 2.0)
+        g = _gate_solid(p0, p1)
         # A gate must not reach below the plate. It is aimed at the closest point on the part, and
         # a part resting on the plate touches z=0 there, so the gate would be a bar centred on
         # z=0 with half of it below the plate. The slicer then lowers the whole card until that
@@ -371,13 +408,9 @@ def _gates_from(picked, frame_mesh):
         if p0[2] < floor or p1[2] < floor:
             p0 = np.array([p0[0], p0[1], max(float(p0[2]), floor)])
             p1 = np.array([p1[0], p1[1], max(float(p1[2]), floor)])
-            length = float(np.linalg.norm(p1 - p0))
-            if length < 1e-6:
+            if float(np.linalg.norm(p1 - p0)) < 1e-6:
                 continue
-            u2 = (p1 - p0) / length
-            g = trimesh.creation.box(extents=[GATE, GATE, length])
-            g.apply_transform(trimesh.geometry.align_vectors([0.0, 0.0, 1.0], u2))
-            g.apply_translation((p0 + p1) / 2.0)
+            g = _gate_solid(p0, p1)
         # A gate that is only a hair below the plate is lifted, not re-aimed. Re-aiming would move
         # it off the two things it joins, while a lift of a few microns cannot detach anything and
         # keeps the card off the trim path.

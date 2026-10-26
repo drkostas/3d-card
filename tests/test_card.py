@@ -296,3 +296,30 @@ def test_build_says_which_parts_left_their_reading_turn(kit):
     assert set(got["reads"]) == {"block", "rod"}
     assert got["off_reading"] == T.off_reading(
         {n: got["moved"][n] for n in got["reads"]}, got["reads"])
+
+
+def _section_at(g, p0, p1, back):
+    # the gate cut across its axis `back` mm before the part's surface
+    p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
+    u = (p1 - p0) / np.linalg.norm(p1 - p0)
+    at = p1 - u * (T.GATE_BITE + back)
+    sec = g.section(plane_origin=at, plane_normal=u)
+    return sec.vertices
+
+
+def test_a_gate_necks_down_where_it_meets_the_part():
+    p0, p1 = np.array([0.0, 0.0, 1.4]), np.array([6.0, 0.0, 1.4])
+    g = T._gate_solid(p0, p1)
+    neck = _section_at(g, p0, p1, T.NECK_L / 2)
+    bar = _section_at(g, p0, p1, T.NECK_L + 1.0)
+    assert abs(np.ptp(neck[:, 1]) - T.NECK_W) < 1e-6 and abs(np.ptp(neck[:, 2]) - T.NECK_H) < 1e-6
+    assert np.ptp(bar[:, 1]) > T.NECK_W + 0.5                  # the bar behind it is the full gate
+    lo = float(neck[:, 2].min())
+    assert abs(lo / 0.2 - round(lo / 0.2)) < 1e-6                # the neck starts on a layer line
+
+
+def test_every_gate_on_a_card_is_necked_at_the_part(kit):
+    got = T.build(verbose=False, source=kit, nest=True, nest_width=60.0)
+    for g, (p0, p1) in zip(got["gate_solids"], got["gate_axes"]):
+        v = _section_at(g, p0, p1, T.NECK_L / 2)
+        assert np.ptp(v[:, 2]) <= T.NECK_H + 1e-6

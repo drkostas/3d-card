@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A gate ends in a neck where it meets the part, `NECK_W` 1.0 mm wide and `NECK_H` 0.8 mm tall (four whole layers of 0.2 mm), for the last `NECK_L` 1.0 mm, after the bar of `GATE` 1.8 mm square from the frame. It was the full 1.8 mm square into the part, which printed kit cards avoid (Rego Kit Card necks its gates to about 0.8 mm at whole layers, and a gate as thick as the part tears on removal). The cutter takes the gate at the neck, so the mark on the part is small. `_gate_solid(p0, p1)` builds one.
 - `card3d.slicecheck` reads a sliced plate back and checks it against the card, for the settings that landed (`settings_in`), the plate, the filament per layer, each first-layer island's lines and brim (`check`), the walls of every few layers (`coverage`), and a picture of the first layer (`picture`, with the `picture` extra). `placed_as_sliced` finds the card where the slicer put it, including a quarter turn. `read_3mf` reads the G-code 3MF Bambu Studio and OrcaSlicer write, and `toolpath` reads arcs.
 - `sprue` and `slicecheck` use trimesh's `to_2D` in place of the deprecated `to_planar`.
 - `NEST_UPRIGHT_SLACK` is 10 mm (was 5). With real outlines a C-shaped part often nests lower turned, and at 5 mm one of a mirrored pair of hands came out a quarter turned. `build` returns `reads` (each part's reading turn) and `off_reading` (the parts not at it, also named in the notes, see `off_reading(moved, reads)`), and the nest prefers a try that keeps them.

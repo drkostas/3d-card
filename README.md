@@ -39,7 +39,7 @@ What it does, in order.
 
 1. Each part is turned so it rests on a face with enough first layer. A part with only a few square millimetres on the plate comes loose in the first layers and the nozzle drags it away.
 2. The parts are laid out in rows, with a runner bar under each row.
-3. Gates are placed at the bottom of each part, in the frame's own plane, where the part comes closest to its bar. A gate higher up would print in the air.
+3. Gates are placed at the bottom of each part, in the frame's own plane, where the part comes closest to its bar. A gate higher up would print in the air. Each gate necks down to 1.0 by 0.8 mm where it meets the part, so it snips cleanly at the part.
 4. Each part gets a small number stamped on the frame next to it. The numbers follow the reading order in `rows`, top row first, and `build` returns them as `numbers`.
 5. The card is made into one solid, the gates are cut, and every piece is matched back to its part by area and size.
 
