@@ -86,7 +86,7 @@ If you list your joints in the source as `{"type": "peg", "size": 3.0, "axis": (
 - `card3d.sprue.make_card` makes the flat version, a kit card of flat plates of one thickness, and `card3d.roundtrip.check` cuts it and checks every plate comes back.
 - `card3d.simulator` reports overhangs and where supports would leave marks, sweeps a peg into its socket to find collisions, finds the best print orientation, and with the `sim` extra decomposes a part into convex pieces and tests in MuJoCo whether the assembled model stands.
 - `card3d.labels` makes small 3D numbers for parts and cards.
-- `card3d.slicecheck` reads a sliced plate back (the G-code 3MF that Bambu Studio and OrcaSlicer write) and checks it against the card. It checks that every setting you asked for landed, that the plate is the one you meant, that the first layer is the largest, that every island has first-layer lines and a brim, and that each piece's walls are drawn. It finds the card where the slicer put it, turned or not. `picture` (with the `picture` extra) draws the first layer over the card.
+- `card3d.slicecheck` reads a sliced plate back (the G-code 3MF that Bambu Studio and OrcaSlicer write) and checks it against the card. It checks that every setting you asked for landed, that the plate is the one you meant, that the first layer is the largest, that every island has first-layer lines and a brim, and that each piece's walls are drawn. It finds the card where the slicer put it, turned or not. `picture` draws the first layer over the card.
 
 ## Claude Code skill
 
