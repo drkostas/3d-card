@@ -213,6 +213,7 @@ The general pattern behind most of these was a correct idea with no room in it (
 
 ## Step 8. Slice, then verify the slice before printing
 
+- `card3d.slicecheck` does the checks below on the G-code 3MF the slicer writes. `read_3mf` reads it, `placed_as_sliced` finds where the slicer put the card (it may move it and turn it a quarter to fit the plate, and a card lined up by a move alone lies across its own toolpath), `check(sliced, card, overrides=..., bed_type=...)` reports the settings that landed, the plate, the filament per layer and each island's first-layer lines and brim, and `coverage` lists the pieces whose walls the slicer drew less than 60%. Read `lined_up` first. When it is false, no other number in the report means anything.
 - Slice for the plate that is actually on the printer. A job sliced for a smooth cool plate on a textured plate was refused as an incompatible plate, and the bed temperature differs (about 35 against 55 degrees C for PLA).
 - Use a brim of about 5 mm, outer only, and confirm in the G-code that it rings every island. The first time it ringed one island, and that was the clue that only one island touched layer 1.
 - Dump extruded length per layer from the G-code. Layer 1 should be the largest layer of the card. In the failed print layers 1 to 3 laid down 13, 2.1 and 2.1 mm of filament and layer 4 laid down 894 mm, so the whole card started in the air.
