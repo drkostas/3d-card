@@ -45,7 +45,7 @@ def part_outline(mesh, z=None):
     sec = mesh.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
     if sec is None:
         raise ValueError("part has no section: is it really a flat plate?")
-    planar, _T = sec.to_planar()
+    planar, _T = sec.to_2D()
     loops = [np.asarray(p) for p in planar.discrete]
     outer = max(loops, key=lambda p: abs(_signed_area(p)))
     holes = [p for p in loops if p is not outer]

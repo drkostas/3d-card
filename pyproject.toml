@@ -33,6 +33,7 @@ Homepage = "https://github.com/drkostas/3d-card"
 
 [project.optional-dependencies]
 sim = ["mujoco>=3.0", "coacd>=1.0"]
+picture = ["matplotlib>=3.7"]
 test = ["pytest>=8"]
 
 [tool.setuptools.packages.find]
