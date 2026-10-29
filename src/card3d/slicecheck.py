@@ -14,7 +14,9 @@ card's mesh (`check`, `coverage`):
 - each piece of the card, cut every few layers, has its walls drawn.
 
 The slicer may move and turn the card on the plate. `placed_as_sliced` finds the quarter turn and
-the move that put it there, so the checks read the card where it was printed.
+the move that put it there, so the checks read the card where it was printed. `parts_as_sliced`
+places each part the same way, and `part_at` names the part at a spot on the plate, for reading a
+camera picture of the finished print.
 
     sliced = read_3mf("card.gcode.3mf")
     card, turns = placed_as_sliced(card, sliced)
@@ -131,14 +133,15 @@ def first_layer_islands(card, z=0.1):
     return list(planar.polygons_full)
 
 
-def placed_as_sliced(card, sliced):
-    """The card turned and moved to where the slicer put it on the plate: (mesh, quarter turns).
+def plate_transform(card, sliced):
+    """The move the slicer gave the card on the plate: (4x4 matrix, quarter turns), or (None, 0).
 
     A slicer turns a card a quarter when it fits the plate better, so a card lined up by a move alone
     can lie across its own toolpath, with islands that read as having no first layer. Each quarter
     turn whose outline is the size of the first layer's lines is tried, and the one with the most of
     those lines inside the card's outline wins, which also tells a turn from its half-turn twin.
-    Returns (card, 0) when no turn matches, and `check` then reports `lined_up` false.
+    The matrix is a turn about the card's own origin followed by a move, so the same matrix places
+    every part of the card (`parts_as_sliced`).
     """
     import trimesh
     from shapely.geometry import Point
@@ -147,14 +150,15 @@ def placed_as_sliced(card, sliced):
     _layers, segs = toolpath(sliced["gcode"])
     body = [sg for sg in segs if any(w in sg[4].lower() for w in ("wall", "surface", "infill", "gap"))]
     if not body:
-        return card, 0
+        return None, 0
     bx = np.array([[a, b] for a, b, c, d, _f in body] + [[c, d] for a, b, c, d, _f in body])
     (gx0, gy0), (gx1, gy1) = bx.min(axis=0), bx.max(axis=0)
     mids = [Point((a + c) / 2, (b + d) / 2) for a, b, c, d, _f in body]
     best = None
     for k in range(4):
+        turn = trimesh.transformations.rotation_matrix(k * np.pi / 2, [0, 0, 1])
         m = card.copy()
-        m.apply_transform(trimesh.transformations.rotation_matrix(k * np.pi / 2, [0, 0, 1]))
+        m.apply_transform(turn)
         islands = first_layer_islands(m)
         if not islands:
             continue
@@ -165,9 +169,74 @@ def placed_as_sliced(card, sliced):
         inside = unary_union([translate(p, dx, dy) for p in islands])
         score = sum(1 for q in mids if inside.contains(q))
         if best is None or score > best[0]:
-            m.apply_translation([dx, dy, 0.0])
-            best = (score, m, k)
-    return (best[1], best[2]) if best else (card, 0)
+            best = (score, trimesh.transformations.translation_matrix([dx, dy, 0.0]) @ turn, k)
+    return (best[1], best[2]) if best else (None, 0)
+
+
+def placed_as_sliced(card, sliced):
+    """The card turned and moved to where the slicer put it on the plate: (mesh, quarter turns).
+
+    See `plate_transform`. Returns (card, 0) when no turn matches, and `check` then reports
+    `lined_up` false.
+    """
+    matrix, turns = plate_transform(card, sliced)
+    if matrix is None:
+        return card, 0
+    m = card.copy()
+    m.apply_transform(matrix)
+    return m, turns
+
+
+def parts_as_sliced(parts: dict, card, sliced) -> dict:
+    """Each part of the card where it was printed on the plate: {name: mesh}, in the slicer's
+    plate coordinates. `parts` are the card's parts in the card's own frame, as the card was built.
+    Use it to tell which part a spot on a camera picture of the plate is, with `part_at`. Empty
+    when the card cannot be lined up with the slice.
+    """
+    matrix, _turns = plate_transform(card, sliced)
+    if matrix is None:
+        return {}
+    out = {}
+    for name, part in parts.items():
+        m = part.copy()
+        m.apply_transform(matrix)
+        out[name] = m
+    return out
+
+
+def _xy_distance(mesh, x: float, y: float) -> float:
+    """How far a point on the plate is from the mesh's shadow, in mm (0 inside the shadow)."""
+    t = mesh.triangles[:, :, :2]
+    p = np.array([x, y])
+    a, b, c = t[:, 0], t[:, 1], t[:, 2]
+
+    def cross(u, v):
+        return u[:, 0] * v[:, 1] - u[:, 1] * v[:, 0]
+
+    d1, d2, d3 = cross(b - a, p - a), cross(c - b, p - b), cross(a - c, p - c)
+    inside = ((d1 >= 0) & (d2 >= 0) & (d3 >= 0)) | ((d1 <= 0) & (d2 <= 0) & (d3 <= 0))
+    if inside.any():
+        return 0.0
+    best = np.inf
+    for u, v in ((a, b), (b, c), (c, a)):
+        e = v - u
+        ll = np.maximum((e * e).sum(axis=1), 1e-12)
+        s = np.clip(((p - u) * e).sum(axis=1) / ll, 0.0, 1.0)
+        best = min(best, float(np.sqrt((((u + e * s[:, None]) - p) ** 2).sum(axis=1)).min()))
+    return best
+
+
+def part_at(placed: dict, x: float, y: float):
+    """The part whose shadow on the plate is nearest the point (x, y): (name, distance in mm).
+
+    `placed` is what `parts_as_sliced` returns. The distance is 0 when the point is over the part,
+    so a large distance says the point is on the frame or the bare plate, not on a part.
+    """
+    if not placed:
+        return None, float("inf")
+    got = {name: _xy_distance(m, x, y) for name, m in placed.items()}
+    name = min(got, key=got.get)
+    return name, got[name]
 
 
 def check(sliced: dict, card, overrides=None, bed_type=None, brim_width=None) -> dict:
