@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - `card3d.slicecheck.parts_as_sliced(parts, card, sliced)` places each part of a card where the slicer printed it, and `part_at(placed, x, y)` names the part nearest a spot on the plate with its distance in mm (0 over the part). Together they tell which part a spot on a camera picture of a finished print is. `plate_transform(card, sliced)` gives the turn and move as one matrix, and `placed_as_sliced` now uses it.
 
