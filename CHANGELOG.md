@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `card3d.slicecheck.parts_as_sliced(parts, card, sliced)` places each part of a card where the slicer printed it, and `part_at(placed, x, y)` names the part nearest a spot on the plate with its distance in mm (0 over the part). Together they tell which part a spot on a camera picture of a finished print is. `plate_transform(card, sliced)` gives the turn and move as one matrix, and `placed_as_sliced` now uses it.
+
 ## 0.2.0
 
 - A gate ends in a neck where it meets the part, `NECK_W` 1.0 mm wide and `NECK_H` 0.8 mm tall (four whole layers of 0.2 mm), for the last `NECK_L` 1.0 mm, after the bar of `GATE` 1.8 mm square from the frame. It was the full 1.8 mm square into the part, which printed kit cards avoid (Rego Kit Card necks its gates to about 0.8 mm at whole layers, and a gate as thick as the part tears on removal). The cutter takes the gate at the neck, so the mark on the part is small. `_gate_solid(p0, p1)` builds one.

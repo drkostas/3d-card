@@ -90,3 +90,31 @@ def test_read_3mf_reads_the_plate_gcode(tmp_path):
     sliced = SC.read_3mf(f)
     assert "CHANGE_LAYER" in sliced["gcode"] and "prediction" in sliced["slice_info"]
     assert sliced["plate_png"] is None
+
+
+def test_parts_are_placed_where_the_slicer_put_the_card_and_named_by_a_spot():
+    # a card of two pads, 30 x 12 in its own frame, printed turned a quarter as 12 x 30
+    left = trimesh.creation.box(bounds=[[0.0, 0.0, 0.0], [10.0, 12.0, 2.0]])
+    right = trimesh.creation.box(bounds=[[20.0, 0.0, 0.0], [30.0, 12.0, 2.0]])
+    card = trimesh.util.concatenate([left, right])
+    sliced = {"gcode": _gcode((100, 50, 112, 80), SETTINGS), "slice_info": "", "plate_png": None}
+    matrix, turns = SC.plate_transform(card, sliced)
+    assert turns in (1, 3) and matrix.shape == (4, 4)
+    placed = SC.parts_as_sliced({"left": left, "right": right}, card, sliced)
+    (x0, y0, _), (x1, y1, _) = np.vstack([m.bounds for m in placed.values()]).min(0), \
+        np.vstack([m.bounds for m in placed.values()]).max(0)
+    assert abs(x0 - 100) < 0.5 and abs(x1 - 112) < 0.5 and abs(y0 - 50) < 0.5 and abs(y1 - 80) < 0.5
+    for name, m in placed.items():
+        cx, cy = m.bounds.mean(axis=0)[:2]
+        assert SC.part_at(placed, cx, cy) == (name, 0.0)
+    # the gap between the pads is 10 mm wide, so its middle is 5 mm from either pad
+    gap_x, gap_y = 106.0, 65.0
+    name, far = SC.part_at(placed, gap_x, gap_y)
+    assert abs(far - 5.0) < 0.01, (name, far)
+
+
+def test_a_card_that_cannot_be_lined_up_places_no_parts():
+    sliced = {"gcode": _gcode((100, 50, 160, 90), SETTINGS), "slice_info": "", "plate_png": None}
+    assert SC.plate_transform(_card(), sliced) == (None, 0)
+    assert SC.parts_as_sliced({"card": _card()}, _card(), sliced) == {}
+    assert SC.part_at({}, 0.0, 0.0) == (None, float("inf"))
