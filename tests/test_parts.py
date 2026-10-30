@@ -29,6 +29,27 @@ def test_a_ball_can_be_pushed_home(size):
     assert where < size / 2.0                  # where the slits are, not further out
 
 
+def test_a_small_ball_still_gets_a_neck_of_five_lines():
+    # as a fraction alone a 3 mm ball's neck was 1.02 mm, and printed balls snapped off there
+    ball = J.male("ball", 3.0, (0.0, 0.0, 1.0), (0.0, 0.0, 0.0), backset=0.0)
+    mid = J.ball_reach(3.0) / 2.0                     # half way from the joint point to the ball
+    sec = ball.section(plane_origin=(0.0, 0.0, mid), plane_normal=(0.0, 0.0, 1.0))
+    width = float(np.ptp(sec.to_2D()[0].vertices, axis=0).max())
+    assert width >= J.BALL_NECK_MIN - 0.05, width
+    assert J.ball_neck(6.0) == pytest.approx(6.0 * J.BALL_NECK)   # a big ball keeps its share
+
+
+def test_a_looser_fit_is_squeezed_less_on_the_way_in():
+    from card3d.coupons import ball_coupon as C
+    axis, at = np.array([0.0, 0.0, 1.0]), np.zeros(3)
+    squeezes = []
+    for gap, grip in ((0.20, 0.18), (0.30, 0.10), (0.40, 0.05)):
+        sock = C.socket_block(5.0, axis, at, gap=gap, grip=grip, wall=1.6)
+        squeezes.append(J.push_in(sock, 5.0, axis, at)[0])
+    assert squeezes[0] > squeezes[1] > squeezes[2] > 0.0, squeezes
+    assert C.check(5.0, verbose=False, gap=0.30, grip=0.10, wall=1.6)["ok"]
+
+
 def test_push_in_sees_a_blocked_socket():
     # a plain cylinder of material over the cavity's mouth: the ball cannot get past it
     size, axis, at = 3.0, np.array([0.0, 0.0, 1.0]), np.zeros(3)

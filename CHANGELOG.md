@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- A ball's neck is never thinner than `BALL_NECK_MIN` (2.0 mm, five lines of a 0.4 mm nozzle). As a fraction of the ball alone (`BALL_NECK`, 0.34), a 3 mm ball had a 1.02 mm neck, and on a printed kit those balls snapped off at the neck as they were pushed into their sockets. `ball_neck(size)` gives the diameter. A small ball now tilts less before its neck meets the rim, and `ball_coupon` reports it (a 3 mm ball turns 15 degrees, 4 to 6 mm balls 30).
+- `female("ball", ...)` and `ball_depth` take `gap` (per side, in the cavity), `grip` (per side, at the rim) and `wall`, `male` takes `neck`, and `socket_reach` takes `gap` and `wall`. `ball_coupon.socket_block` and `ball_coupon.check` pass the same values, so a coupon can print and check one ball size in several fits.
+
 ## 0.3.0
 
 - `card3d.slicecheck.parts_as_sliced(parts, card, sliced)` places each part of a card where the slicer printed it, and `part_at(placed, x, y)` names the part nearest a spot on the plate with its distance in mm (0 over the part). Together they tell which part a spot on a camera picture of a finished print is. `plate_transform(card, sliced)` gives the turn and move as one matrix, and `placed_as_sliced` now uses it.

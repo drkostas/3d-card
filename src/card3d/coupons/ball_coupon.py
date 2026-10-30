@@ -42,26 +42,34 @@ from card3d import joints as J
 PUSH_IN_SLACK = 1.25
 
 
-def socket_block(size, axis, at):
-    """Return a block standing in for the parent part, with just enough material to hold the cup."""
+def socket_block(size, axis, at, gap=None, grip=None, wall=None):
+    """Return a block standing in for the parent part, with just enough material to hold the cup.
+
+    `gap`, `grip` and `wall` are passed to `joints.female`, so one size can be built in several fits."""
     R = size / 2.0
+    g = J.BALL_CLEAR if gap is None else gap
+    w = J.BALL_WALL if wall is None else wall
     c = J.ball_centre(size, axis, at)
-    blk = trimesh.creation.cylinder(radius=R + J.BALL_CLEAR + J.BALL_WALL,
-                                    height=(R + J.BALL_CLEAR) * 2 + J.BALL_WALL * 2)
+    blk = trimesh.creation.cylinder(radius=R + g + w, height=(R + g) * 2 + w * 2)
     blk.apply_translation(c)
-    return blk.difference(J.female("ball", size, axis, at))
+    return blk.difference(J.female("ball", size, axis, at, gap=gap, grip=grip, wall=wall))
 
 
-def check(size=5.0, verbose=True):
-    """Measure one ball size and return the results, with "ok" true when all four checks pass."""
+def check(size=5.0, verbose=True, gap=None, grip=None, wall=None, neck=None):
+    """Measure one ball size and return the results, with "ok" true when all five checks pass.
+
+    `gap`, `grip`, `wall` and `neck` override the joint defaults, as on a coupon that prints one
+    size in several fits."""
     axis, at = np.array([0.0, 0.0, 1.0]), np.zeros(3)
     R = size / 2.0
+    g = J.BALL_CLEAR if gap is None else gap
+    want_grip = J.ball_grip(size) if grip is None else grip
     c = float(J.ball_centre(size, axis, at)[2])
-    depth = J.ball_depth(size)
-    rim = float(np.sqrt((R + J.BALL_CLEAR) ** 2 - depth ** 2))
+    depth = J.ball_depth(size, gap, grip)
+    rim = float(np.sqrt((R + g) ** 2 - depth ** 2))
 
-    sock = socket_block(size, axis, at)
-    ball = J.male("ball", size, axis, at, backset=3.0)
+    sock = socket_block(size, axis, at, gap=gap, grip=grip, wall=wall)
+    ball = J.male("ball", size, axis, at, backset=3.0, neck=neck)
 
     pieces = sock.split(only_watertight=False)
     solids = [p for p in pieces if p.volume > 0]
@@ -95,7 +103,7 @@ def check(size=5.0, verbose=True):
 
     # 5. the ball must go in, meeting nothing harder than the rim on the way
     squeeze, where = J.push_in(sock, size, axis, at)
-    goes_in = squeeze <= J.ball_grip(size) * PUSH_IN_SLACK + 0.02
+    goes_in = squeeze <= want_grip * PUSH_IN_SLACK + 0.02
 
     if verbose:
         print(f"  ball {size:.1f} mm, cup reaches {depth:.2f} mm past the equator")
@@ -109,7 +117,7 @@ def check(size=5.0, verbose=True):
             print(f"    seated, tilted {d:2d} deg all round   clash {v:6.3f} mm3")
         print(f"    turns freely to at least           {free_to} deg")
         print(f"    pushed in, squeezed at most        {squeeze:.3f} mm/side, {where:.2f} mm before "
-              f"the seat (grip {J.ball_grip(size):.3f})  {'' if goes_in else '  <- CANNOT BE PUSHED IN'}")
+              f"the seat (grip {want_grip:.3f})  {'' if goes_in else '  <- CANNOT BE PUSHED IN'}")
     return {"sound": sound, "grips": grips, "retain_mm3": peak,
             "free_deg": free_to, "rim": rim, "ball_r": R, "push_in_mm": squeeze,
             "ok": bool(sound and grips and peak > 0.05 and free_to >= 30 and goes_in)}

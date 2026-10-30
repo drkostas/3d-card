@@ -111,19 +111,32 @@ def ball_grip(size):
     return max(BALL_GRIP_MM, (size / 2.0) * BALL_GRIP_FRAC)
 
 
-def ball_depth(size, gap=None):
-    """How far past the equator the cup has to reach to achieve that grip."""
+def ball_depth(size, gap=None, grip=None):
+    """How far past the equator the cup has to reach to achieve that grip.
+
+    `gap` (per side, in the cavity) and `grip` (per side, at the rim) default to `BALL_CLEAR` and
+    `ball_grip(size)`. A fit coupon passes its own values to print the same ball in several fits."""
     R = size / 2.0
     gap = BALL_CLEAR if gap is None else gap
-    want = R - ball_grip(size)                       # the rim radius we need
+    want = R - (ball_grip(size) if grip is None else grip)   # the rim radius we need
     d2 = (R + gap) ** 2 - want ** 2
     # never so deep that the cup closes over the ball and cannot be sprung at all
     return float(min(math.sqrt(max(d2, 1e-9)), (R + gap) * 0.80))
 BALL_NECK = 0.34          # neck diameter, and its length, as a fraction of the ball's diameter
+# A neck has a floor of its own. As a fraction alone, a 3 mm ball got a 1.02 mm neck, about two and a
+# half nozzle lines, and on a printed kit those balls snapped off at the neck when they were pushed
+# into their sockets. 2.0 mm is five lines of a 0.4 mm nozzle. A smaller ball then tilts less before
+# its neck meets the rim, so `ball_coupon` reports how far each size turns.
+BALL_NECK_MIN = 2.0
 BALL_WALL = 1.00          # material left around the cavity, so the socket has something to spring
 BALL_SLITS = 4            # relief cuts through the mouth
 BALL_SLIT_W = 0.55        # each slit's width, wider than a nozzle so the slicer draws it
 BALL_LEAD = 0.05          # how much wider than the cavity the lead-in below the rim is, per side
+
+
+def ball_neck(size):
+    """The neck's diameter: its share of the ball, and never under `BALL_NECK_MIN`."""
+    return max(size * BALL_NECK, BALL_NECK_MIN)
 
 
 def ball_reach(size):
@@ -185,8 +198,10 @@ def _axis_frame(axis):
     return trimesh.geometry.align_vectors([0.0, 0.0, 1.0], a)
 
 
-def male(kind, size, axis, at, length=None, backset=None):
+def male(kind, size, axis, at, length=None, backset=None, neck=None):
     """The feature that sticks out, at nominal size.
+
+    `neck` is a ball's neck diameter, `ball_neck(size)` by default.
 
     `backset` is the buried part of the feature and a fit check must not include it. It exists so
     the feature merges into the part that carries it, and it sits inside that part's own material.
@@ -209,7 +224,7 @@ def male(kind, size, axis, at, length=None, backset=None):
         box = trimesh.creation.box(extents=[size * 3, size * 3, keep * 2])
         m = m.intersection(box)
         reach = ball_reach(size) if length is None else float(length)
-        neck_d = size * BALL_NECK
+        neck_d = ball_neck(size) if neck is None else float(neck)
         neck_l = reach + back + keep
         stem = trimesh.creation.cylinder(radius=neck_d / 2.0, height=neck_l)
         # the neck runs from inside the child's own material up to the middle of the ball
@@ -230,8 +245,12 @@ def male(kind, size, axis, at, length=None, backset=None):
     return m
 
 
-def female(kind, size, axis, at, length=None, slit_phase=0.0):
+def female(kind, size, axis, at, length=None, slit_phase=0.0, gap=None, grip=None, wall=None):
     """The feature that is cut away: the male feature plus the clearance the printer needs.
+
+    For a ball, `gap` (per side, in the cavity), `grip` (per side, at the rim) and `wall` (material
+    the slits are cut through) default to `BALL_CLEAR`, `ball_grip(size)` and `BALL_WALL`. A fit
+    coupon passes its own values to print one ball size in several fits.
 
     `slit_phase` turns the ball socket's relief slits about the joint axis, in radians. Without it
     the slits point wherever `_axis_frame` happens to put them. On a part that is thinner in one
@@ -247,7 +266,8 @@ def female(kind, size, axis, at, length=None, slit_phase=0.0):
         # neck sweeps as the part is twisted, and the slits that let the mouth open to admit it.
         R = size / 2.0
         c = ball_reach(size) if length is None else float(length)   # ball centre, from the joint point
-        gap = BALL_CLEAR
+        gap = BALL_CLEAR if gap is None else float(gap)
+        wall = BALL_WALL if wall is None else float(wall)
         # A cylindrical mouth through a full spherical cavity cannot retain anything. The cavity is
         # the ball plus clearance, so at every height it is wider than the ball. The band where a
         # bore of radius m is narrower than the cavity is the same band where it is narrower than
@@ -256,7 +276,7 @@ def female(kind, size, axis, at, length=None, slit_phase=0.0):
         #
         # Instead the cup itself is the mouth. It wraps past the ball's equator and stops, so its
         # rim is narrower than the ball by construction and no separate mouth feature is needed.
-        depth = ball_depth(size)                      # derived from the grip we need, not fixed
+        depth = ball_depth(size, gap, grip)           # derived from the grip we need, not fixed
         cav = trimesh.creation.icosphere(subdivisions=3, radius=R + gap)
         keep = trimesh.creation.box(extents=[size * 4, size * 4, (R + gap) * 2])
         keep.apply_translation([0, 0, (R + gap) - depth])
@@ -297,7 +317,7 @@ def female(kind, size, axis, at, length=None, slit_phase=0.0):
         # A slit must not cross the axis. Cut as a box through the full diameter, two slits at right
         # angles divide the cup into separate pieces. Like a collet, each slit runs inward from the
         # rim and stops short of the centre, so the fingers stay joined to the cup.
-        outer = R + gap + BALL_WALL
+        outer = R + gap + wall
         for i in range(BALL_SLITS):
             a = 2 * math.pi * i / BALL_SLITS + float(slit_phase)
             span = outer - mouth_r * 0.55            # rim inwards, stopping inside the mouth wall
@@ -368,7 +388,7 @@ def slit_tips(size, axis, at, length, phase, count=None):
     return np.asarray(pts, float)
 
 
-def socket_reach(size):
+def socket_reach(size, gap=None, wall=None):
     """How far the whole ball socket reaches from its centre, the distance a wall must clear.
 
     `R + BALL_CLEAR + BALL_WALL` is the slits' radius, not their reach, and is not enough as a
@@ -381,7 +401,7 @@ def socket_reach(size):
     clears.
     """
     R = size / 2.0
-    outer = R + BALL_CLEAR + BALL_WALL
+    outer = R + (BALL_CLEAR if gap is None else gap) + (BALL_WALL if wall is None else wall)
     below = R * 1.35 / 2.0 + R * 0.72
     return float(math.hypot(outer, below))
 

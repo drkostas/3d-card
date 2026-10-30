@@ -92,7 +92,7 @@ from card3d import simulator as S
 ok, worst_mm3, at_mm = S.insertion_sweep(child_post, parent, axis, travel=10.0)
 ```
 
-A final-pose check misses a collision on the way in. `insertion_sweep` slides the child along its axis from clear to seated. Sweep the post with `backset=0`, because the buried root never passes through the hole. For ball joints, `card3d.coupons.ball_coupon.check(size)` measures four things (one sound solid with no sealed void, rim narrower than the ball, interference when the ball is withdrawn, at least 30 degrees of free tilt all round). Print the sizes you use and turn them by hand.
+A final-pose check misses a collision on the way in. `insertion_sweep` slides the child along its axis from clear to seated. Sweep the post with `backset=0`, because the buried root never passes through the hole. For ball joints, `card3d.coupons.ball_coupon.check(size)` measures five things (one sound solid with no sealed void, rim narrower than the ball, interference when the ball is withdrawn, at least 30 degrees of free tilt all round, and a push-in that meets nothing harder than the rim). Print the sizes you use and turn them by hand. A ball's neck is never under `BALL_NECK_MIN` (2.0 mm): a 3 mm ball with a 1 mm neck snapped off on a printed kit, and with a 2 mm neck it tilts only 15 degrees, so use 4 mm or more where the joint has to turn. To find the fit on a new printer, print one size in several fits: `female` and `check` take `gap`, `grip` and `wall`, and `male` takes `neck`.
 
 ## Step 3. Write the source and build the first card
 
