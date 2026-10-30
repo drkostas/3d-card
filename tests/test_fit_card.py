@@ -77,3 +77,15 @@ def test_ridges_stand_in_from_the_cavity_wall_and_rub_the_ball():
     ball.apply_translation(c)
     assert ridged.intersection(ball).volume > 0.01
     assert plain.intersection(ball).volume < 1e-3
+
+
+def test_a_row_too_wide_for_the_plate_wraps():
+    spec = FC.FitCardSpec(ball_sizes=(4.0,), necks={"2": 0.6}, pegs={}, holes={},
+                          tube_bores={f"T{h}": 5.0 + h / 100 for h in range(21, 31)})
+    pieces, _ = FC.build(spec)
+    placed = FC.layout(pieces, spec, max_width=120.0)
+    import trimesh
+    card = trimesh.util.concatenate(list(placed.values()))
+    assert card.extents[0] <= 120.0 + 1e-6
+    rows = {round(float(placed[f"tube T{h}"].bounds[0][1]), 3) for h in range(21, 31)}
+    assert len(rows) >= 2

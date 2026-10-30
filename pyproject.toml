@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "3d-card"
-version = "0.10.0"
+version = "0.11.0"
 description = "Turn a set of 3D-printable parts into one printable card: parts gated to a frame like a model-kit sprue, with a check that every part comes off clean. Includes print-in-place joints and printability checks"
 readme = "README.md"
 requires-python = ">=3.10"

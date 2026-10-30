@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.0
+
+- `fit_card.layout(..., max_width=240.0)` wraps a row wider than `max_width` mm onto the next line, so a fit card with many tubes or sockets still fits the plate. Ten axle tubes in one row made a card 269 mm wide.
+
 ## 0.10.0
 
 - **Fix: a ball socket is cut with the gap it is given.** `joints.female` set `gap` to the general running clearance `CLEAR` (0.30 mm) before its ball branch, so every ball cavity was the ball plus 0.30 mm whatever `gap` was passed, and the documented default `BALL_CLEAR` (0.20 mm) never applied. The rim grip was computed with the same 0.30 mm, so rims came out as asked. Default ball sockets are now 0.10 mm closer round the ball than before, and fit cards that vary the cavity now vary it. A peg, axle or pivot given a `gap` now uses it too.
