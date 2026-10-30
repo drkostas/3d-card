@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0
+
+- A label that is printed follows the nozzle. `labels.number(text, height, depth, nozzle=Nozzle(...))` makes the text tall enough that its thinnest stroke is two of the nozzle's lines (`fit_height`), and at least two layers deep. `labels.stroke_width(text, height)` measures the thinnest stroke, as the widest brush whose opening keeps all but 2% of the text's area. Bold 4 mm text has strokes of 0.44 to 0.51 mm, one line of a 0.4 mm nozzle, so it prints as single wavy lines; at the nozzle it needs about 7 mm. `Nozzle` is 3d-base's, which 3d-card now needs at 0.5.0 or later.
+- `BALL_NECK_MIN` says why it stays 2.0 mm with any nozzle. It is a floor for strength in PLA, and tied to the nozzle's lines a 0.2 mm nozzle would give the 1 mm neck that snapped.
+
 ## 0.4.1
 
 - `slicecheck.check` compares an override given as a list (one value per extruder or filament, such as `nozzle_volume_type` on a dual-nozzle printer) with the comma-joined value the slicer writes. It compared the list's text and failed every such setting.

@@ -11,6 +11,11 @@ either layout.
 The labels are separate scene meshes, not features of the printed card. Embossing them onto the card
 would change what prints and add one more feature for every downstream check to handle, to solve a
 problem that only exists on screen.
+
+A label that is printed (a tag on a coupon, a name on a plate) has to be drawn by the nozzle. A
+stroke narrower than two lines prints as one wavy line or not at all. `number(..., nozzle=n)` makes
+the text tall enough that its thinnest stroke is two of the nozzle's lines, and at least two layers
+deep. `stroke_width` measures the thinnest stroke of any text at any height.
 """
 import numpy as np
 import trimesh
@@ -18,6 +23,8 @@ from matplotlib.textpath import TextPath
 from matplotlib.font_manager import FontProperties
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
+
+from base3d.nozzle import Nozzle
 
 # DejaVu Sans ships with matplotlib, so no font lookup is needed and the result is the same on
 # every machine.
@@ -45,8 +52,49 @@ def _glyph_polygons(text, size=1.0):
     return list(out.geoms) if hasattr(out, "geoms") else [out]
 
 
-def number(text, height=6.0, depth=1.0):
-    """One number as a solid, lying in the XY plane, centred on the origin."""
+#: the share of a text's area an opening may remove before its strokes count as narrower than it
+STROKE_LOSS = 0.02
+
+
+def stroke_width(text, height=1.0, tol=0.005):
+    """The thinnest stroke of `text` at `height`, in mm.
+
+    It is the widest round brush that still paints the whole text: opening the outline with a brush
+    of that width (shrinking it by half the width, then growing it back) loses under `STROKE_LOSS` of
+    its area. A stroke narrower than the brush is lost by the opening. The width scales with the
+    height, so one measurement gives every size."""
+    polys = _glyph_polygons(text, size=height)
+    if not polys:
+        return 0.0
+    shape = unary_union(polys)
+    area = shape.area
+    lo, hi = 0.0, float(height)
+    while hi - lo > tol:
+        w = 0.5 * (lo + hi)
+        kept = shape.buffer(-w / 2.0).buffer(w / 2.0).area
+        if area - kept <= STROKE_LOSS * area:
+            lo = w
+        else:
+            hi = w
+    return lo
+
+
+def fit_height(text, nozzle: Nozzle, height=0.0):
+    """The smallest height, at least `height`, at which the text's thinnest stroke is `nozzle.wall`."""
+    per_mm = stroke_width(text, height=10.0) / 10.0
+    if per_mm <= 0:
+        return float(height)
+    return max(float(height), round(nozzle.wall / per_mm + 0.05, 1))
+
+
+def number(text, height=6.0, depth=1.0, nozzle: Nozzle | None = None):
+    """One number as a solid, lying in the XY plane, centred on the origin.
+
+    With `nozzle`, the text grows as needed so its thinnest stroke is two of the nozzle's lines, and
+    it is at least two layers deep (`fit_height`)."""
+    if nozzle is not None:
+        height = fit_height(text, nozzle, height)
+        depth = max(float(depth), nozzle.plate)
     polys = _glyph_polygons(text, size=height)
     if not polys:
         return None
