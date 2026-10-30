@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- `slicecheck.check` compares an override given as a list (one value per extruder or filament, such as `nozzle_volume_type` on a dual-nozzle printer) with the comma-joined value the slicer writes. It compared the list's text and failed every such setting.
+
 ## 0.4.0
 
 - A ball's neck is never thinner than `BALL_NECK_MIN` (2.0 mm, five lines of a 0.4 mm nozzle). As a fraction of the ball alone (`BALL_NECK`, 0.34), a 3 mm ball had a 1.02 mm neck, and on a printed kit those balls snapped off at the neck as they were pushed into their sockets. `ball_neck(size)` gives the diameter. A small ball now tilts less before its neck meets the rim, and `ball_coupon` reports it (a 3 mm ball turns 15 degrees, 4 to 6 mm balls 30).

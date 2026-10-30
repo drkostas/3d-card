@@ -118,3 +118,11 @@ def test_a_card_that_cannot_be_lined_up_places_no_parts():
     assert SC.plate_transform(_card(), sliced) == (None, 0)
     assert SC.parts_as_sliced({"card": _card()}, _card(), sliced) == {}
     assert SC.part_at({}, 0.0, 0.0) == (None, float("inf"))
+
+
+def test_a_setting_per_extruder_is_compared_as_a_list():
+    # a dual-nozzle printer writes one value per extruder, joined by commas
+    assert SC._same(["Standard", "Standard"], "Standard,Standard")
+    assert not SC._same(["Standard", "Standard"], "Standard")
+    assert not SC._same(["Standard", "Standard"], "Standard,High Flow")
+    assert SC._same([0.4, 0.4], "0.4,0.4")
