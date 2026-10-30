@@ -110,10 +110,15 @@ def toolpath(gcode: str, every: dict | None = None):
     return layers, segs
 
 
-def _same(want: str, got: str | None) -> bool:
+def _same(want, got: str | None) -> bool:
+    """Whether a setting landed as wanted. A list is one value per extruder or filament, which the
+    slicer writes joined by commas."""
     if got is None:
         return False
     g = got.strip().strip('"')
+    if isinstance(want, (list, tuple)):
+        parts = [x.strip() for x in g.split(",")]
+        return len(parts) == len(want) and all(_same(w, x) for w, x in zip(want, parts))
     w = str(want).strip()
     if w == g:
         return True
