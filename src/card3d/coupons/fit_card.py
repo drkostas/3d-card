@@ -263,10 +263,11 @@ def build(spec: FitCardSpec | None = None):
     return pieces, info
 
 
-def layout(pieces, spec: FitCardSpec | None = None, gap: float = 4.0):
+def layout(pieces, spec: FitCardSpec | None = None, gap: float = 4.0, max_width: float = 240.0):
     """The pieces on a card that reads as a table: one row per ball size (its sockets, then its
     balls), then the pegs and holes, then the tubes, then any other piece a project added (an axle
-    to try in the tubes, say) in a last row. Each piece sits on the plate at z = 0."""
+    to try in the tubes, say) in a last row. A row wider than `max_width` (mm) wraps onto the next
+    line, so a long row of tubes still fits the plate. Each piece sits on the plate at z = 0."""
     spec = spec or FitCardSpec()
     rows = [[n for n in pieces if n.startswith((f"socket {s:g}", f"ball {s:g}-"))] for s in spec.ball_sizes]
     rows += [[n for n in pieces if n.startswith(("peg ", "hole "))], [n for n in pieces if n.startswith("tube ")]]
@@ -278,6 +279,9 @@ def layout(pieces, spec: FitCardSpec | None = None, gap: float = 4.0):
         for name in row:
             m = pieces[name].copy()
             lo, hi = m.bounds
+            if x > 0 and x + (hi[0] - lo[0]) > max_width:   # the row would leave the plate: wrap it
+                x, y = 0.0, y + row_h + gap
+                row_h = 0.0
             m.apply_translation([x - lo[0], y - lo[1], -lo[2]])
             placed[name] = m
             x += hi[0] - lo[0] + gap
