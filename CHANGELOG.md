@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.0
+
+- `card3d.coupons.fit_card` builds one print that finds a kit's fits by hand before the kit is printed. For each ball size it prints sockets that differ only in fit (letters A, B, C: gap in the cavity and share of the rim grip) and balls that differ only in neck thickness (numbers 1, 2, 3), and any ball goes into any socket of its size, so fit and strength are read apart. Beside them it prints pegs of several heights with holes of several clearances, and short tubes of several bores for an axle. `FitCardSpec` holds every size, `build` gives the pieces named by what they vary, `layout` lays them as a table, and `checks` measures each socket with its thinnest and thickest neck (goes in past only the rim, holds when pulled, turns 30 degrees all round). Labels are sized for the nozzle (`labels.number(..., nozzle=)`), and every piece is one watertight solid.
+
 ## 0.6.0
 
 - `slicecheck.travels(gcode, line_w=0.42)` reads how much the nozzle moves without printing, layer by layer: the pull-backs of the filament (`retracts`), the moves that print nothing (`travels`, `travel_mm`), the part of them over no line printed in that layer (`air_mm`), and the moves with more than `AIR_MIN_MM` (1 mm) of air (`crossings`), with totals and the worst layer. Each crossing is a chance for a string or a blob on a plate of many parts, so two slices can be compared by number before either prints. The layer's lines are laid on a grid of cells a third of a line wide and each move is read at points every `AIR_STEP_MM` (0.2 mm), which stays within a few percent of cutting each move against the merged lines and runs about 25 times faster (a 186-layer kit card in about 8 s). A 39-piece test card read 2501 pull-backs and 1908 crossings, and the strings on its print sat between the pieces.
