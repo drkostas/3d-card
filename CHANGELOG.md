@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.0
+
+- `card3d.footing` judges whether a loose part stays on the plate by the shape of its first layer, not only its area. `footing(mesh)` gives the first layer's area, its widest solid spot (`width_mm`, the diameter of the largest circle inside it), its length, and how much the part grows in the first millimetre up (`growth`), and calls it `narrow` when the widest spot is under `FOOT_MIN_W` (3 mm) and it is either more than `FOOT_MAX_ASPECT` (4) times as long or under a part that grows past `FOOT_MAX_GROWTH` (2) times. A printed snap axle laid on its flat had 19.3 mm2 of first layer, above the area where parts are starved, as one strip under 2 mm wide and 16 mm long under a body nearly three times as wide a millimetre up, and it came loose and was dragged. `ears(mesh)` adds a thin disc (`EAR_D` 7 mm, `EAR_H` 0.4 mm) under each end of the first layer's long axis, the mouse ears that are cut off after printing, and leaves the part above them unchanged; with them the same axle printed and stayed down.
+
 ## 0.8.0
 
 - `FitCardSpec(grip_mm=True)` reads the second number of each fit as the rim's grip in mm per side, the same for every ball size, and `fit_card.grip_of(spec, size, letter)` gives it either way. On a printed fit card the fit followed the rim's grip in mm and not the ball size: sockets with 0.07 mm of grip took their ball at 4, 5 and 6 mm, and from 0.088 mm none went in easily, while the default grip, a share of `joints.ball_grip`, grows with the ball.
