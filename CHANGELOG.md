@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.0
+
+- `slicecheck.travels(gcode, line_w=0.42)` reads how much the nozzle moves without printing, layer by layer: the pull-backs of the filament (`retracts`), the moves that print nothing (`travels`, `travel_mm`), the part of them over no line printed in that layer (`air_mm`), and the moves with more than `AIR_MIN_MM` (1 mm) of air (`crossings`), with totals and the worst layer. Each crossing is a chance for a string or a blob on a plate of many parts, so two slices can be compared by number before either prints. The layer's lines are laid on a grid of cells a third of a line wide and each move is read at points every `AIR_STEP_MM` (0.2 mm), which stays within a few percent of cutting each move against the merged lines and runs about 25 times faster (a 186-layer kit card in about 8 s). A 39-piece test card read 2501 pull-backs and 1908 crossings, and the strings on its print sat between the pieces.
+
 ## 0.5.0
 
 - A label that is printed follows the nozzle. `labels.number(text, height, depth, nozzle=Nozzle(...))` makes the text tall enough that its thinnest stroke is two of the nozzle's lines (`fit_height`), and at least two layers deep. `labels.stroke_width(text, height)` measures the thinnest stroke, as the widest brush whose opening keeps all but 2% of the text's area. Bold 4 mm text has strokes of 0.44 to 0.51 mm, one line of a 0.4 mm nozzle, so it prints as single wavy lines; at the nozzle it needs about 7 mm. `Nozzle` is 3d-base's, which 3d-card now needs at 0.5.0 or later.
