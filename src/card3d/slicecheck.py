@@ -110,6 +110,117 @@ def toolpath(gcode: str, every: dict | None = None):
     return layers, segs
 
 
+#: a move in the air shorter than this is a hop inside one part's outline, not a crossing
+AIR_MIN_MM = 1.0
+#: the spacing of the points a move is read at
+AIR_STEP_MM = 0.2
+
+
+def _sample(segs, step):
+    """Points every `step` along each segment (x0, y0, x1, y1): their x and y, the segment each belongs
+    to, how many each segment got, and each segment's length."""
+    length = np.hypot(segs[:, 2] - segs[:, 0], segs[:, 3] - segs[:, 1])
+    k = np.maximum(2, np.ceil(length / step).astype(int) + 1)
+    owner = np.repeat(np.arange(len(segs)), k)
+    start = np.repeat(np.cumsum(k) - k, k)
+    f = (np.arange(int(k.sum())) - start) / np.repeat(k - 1, k)
+    px = segs[owner, 0] + f * (segs[owner, 2] - segs[owner, 0])
+    py = segs[owner, 1] + f * (segs[owner, 3] - segs[owner, 1])
+    return px, py, owner, k, length
+
+
+def travels(gcode: str, line_w: float = 0.42) -> dict:
+    """How much the nozzle moves without printing, layer by layer, and how much of it is in open air.
+
+    A plate of many separate parts is printed by jumping between them on every layer. Each jump is a
+    pull-back of the filament, a move, and a restart, and a nozzle that oozes leaves a string across
+    the gap or a blob where it starts again. For each layer this counts the pull-backs (`retracts`),
+    the moves that print nothing (`travels`, with their length `travel_mm`), and the part of those
+    moves that runs over no line printed in that layer (`air_mm`, read against the layer's own lines
+    widened to `line_w`, on a grid of cells a third of a line wide). A move with more than `AIR_MIN_MM` of it in the air is a `crossing`.
+    Two slices of the same plate can be compared by these numbers before either is printed.
+    """
+    per = []
+    x = y = z = 0.0
+    e_rel, layer = True, 0
+    lines, moves, retracts, pulled = [], [], 0, False
+
+    def close():
+        if not layer:
+            return
+        air, crossings = 0.0, 0
+        if moves:
+            # The layer's printed lines go on a grid of cells a third of a line wide: points every sixth
+            # line along each line mark their cell, and one cell of growth gives the line its width.
+            # Each move is then read at points every AIR_STEP_MM, all at once, as the share of them
+            # on no marked cell.
+            cell = line_w / 3.0
+            m = np.asarray(moves, float)
+            mpx, mpy, owner, k, length = _sample(m, AIR_STEP_MM)
+            if lines:
+                segs = np.asarray([(a, b, c, d) for pts in lines for (a, b), (c, d) in zip(pts[:-1], pts[1:])], float)
+                lx, ly, _o, _k, _l = _sample(segs, cell / 2.0)
+                x0, y0 = min(lx.min(), mpx.min()) - 2 * cell, min(ly.min(), mpy.min()) - 2 * cell
+                nx_ = int((max(lx.max(), mpx.max()) - x0) / cell) + 3
+                ny_ = int((max(ly.max(), mpy.max()) - y0) / cell) + 3
+                grid = np.zeros((nx_, ny_), bool)
+                grid[((lx - x0) / cell).astype(int), ((ly - y0) / cell).astype(int)] = True
+                grown = grid.copy()
+                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)):
+                    grown |= np.roll(np.roll(grid, dx, 0), dy, 1)
+                inside = grown[((mpx - x0) / cell).astype(int), ((mpy - y0) / cell).astype(int)]
+            else:
+                inside = np.zeros(len(mpx), bool)
+            out = np.bincount(owner, weights=~inside, minlength=len(m)) / k * length
+            air = float(out.sum())
+            crossings = int((out > AIR_MIN_MM).sum())
+        per.append({"z": round(z, 3), "retracts": retracts, "travels": len(moves),
+                    "travel_mm": round(sum(float(np.hypot(c - a, d - b)) for a, b, c, d in moves), 1),
+                    "air_mm": round(air, 1), "crossings": crossings})
+
+    for line in gcode.splitlines():
+        if line.startswith("; CHANGE_LAYER"):
+            close()
+            layer += 1
+            lines, moves, retracts, pulled = [], [], 0, False
+            continue
+        if line.startswith("; Z_HEIGHT:"):
+            z = float(line.split(":")[1])
+            continue
+        if line.startswith("M83"):
+            e_rel = True
+        elif line.startswith("M82"):
+            e_rel = False
+        if not (line.startswith("G1 ") or line.startswith("G0 ") or line.startswith("G2 ") or line.startswith("G3 ")):
+            continue
+        code = line.split(";", 1)[0]
+        vals = dict((w[0], float(w[1:])) for w in code.split()[1:] if len(w) > 1 and w[0] in "XYZEIJ" and
+                    re.fullmatch(r"-?(\d+\.?\d*|\.\d+)", w[1:]))
+        nx, ny = vals.get("X", x), vals.get("Y", y)
+        e = vals.get("E", 0.0) if e_rel else 0.0
+        moved = (nx, ny) != (x, y)
+        if layer:
+            if e < 0:
+                if not pulled:
+                    retracts += 1
+                pulled = True
+            elif e > 0:
+                pulled = False
+                if moved:
+                    pts = _arc(x, y, nx, ny, vals.get("I", 0.0), vals.get("J", 0.0), line.startswith("G2")) \
+                        if line[:2] in ("G2", "G3") else [(x, y), (nx, ny)]
+                    lines.append(pts)
+            elif moved:
+                moves.append((x, y, nx, ny))
+        x, y = nx, ny
+    close()
+    return {"layers": per,
+            "retracts": sum(p["retracts"] for p in per),
+            "crossings": sum(p["crossings"] for p in per),
+            "air_mm": round(sum(p["air_mm"] for p in per), 1),
+            "worst_layer": max(per, key=lambda p: p["crossings"]) if per else None}
+
+
 def _same(want, got: str | None) -> bool:
     """Whether a setting landed as wanted. A list is one value per extruder or filament, which the
     slicer writes joined by commas."""

@@ -126,3 +126,39 @@ def test_a_setting_per_extruder_is_compared_as_a_list():
     assert not SC._same(["Standard", "Standard"], "Standard")
     assert not SC._same(["Standard", "Standard"], "Standard,High Flow")
     assert SC._same([0.4, 0.4], "0.4,0.4")
+
+
+def _outline(x0, y0, side=10.0, e=0.5):
+    """G-code for one square outline at (x0, y0), started from a travel to its corner."""
+    pts = [(x0, y0), (x0 + side, y0), (x0 + side, y0 + side), (x0, y0 + side), (x0, y0)]
+    out = [f"G1 X{pts[0][0]} Y{pts[0][1]} F12000", "G1 E.8"]
+    out += [f"G1 X{x} Y{y} E{e}" for x, y in pts[1:]]
+    out.append("G1 E-.8")
+    return out
+
+
+def _two_layers(*squares):
+    g = ["M83"]
+    for z in (0.2, 0.4):
+        g += ["; CHANGE_LAYER", f"; Z_HEIGHT: {z}"]
+        for x0, y0 in squares:
+            g += _outline(x0, y0)
+    return "\n".join(g) + "\n"
+
+
+def test_a_jump_between_two_parts_is_a_crossing_and_a_move_over_one_part_is_not():
+    apart = SC.travels(_two_layers((0, 0), (40, 0)))
+    # the jump from one square to the other runs 30 mm over nothing: once on the first layer, and on
+    # the second also the jump back from where the first layer ended
+    assert [p["crossings"] for p in apart["layers"]] == [1, 2]
+    assert 28 < apart["layers"][0]["air_mm"] < 31 and 56 < apart["layers"][1]["air_mm"] < 61
+    assert apart["retracts"] == 4 and apart["crossings"] == 3
+    # one square: the only travel is onto its own corner, which its lines cover
+    alone = SC.travels(_two_layers((0, 0)))
+    assert alone["crossings"] == 0 and alone["air_mm"] < 0.5
+
+
+def test_more_parts_means_more_crossings():
+    few = SC.travels(_two_layers((0, 0), (40, 0)))
+    many = SC.travels(_two_layers((0, 0), (40, 0), (80, 0), (0, 40)))
+    assert many["crossings"] > few["crossings"] and many["air_mm"] > few["air_mm"]
