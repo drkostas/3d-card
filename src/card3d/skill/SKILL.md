@@ -51,6 +51,7 @@ What was learned about clearances.
 - A published clearance only transfers if the assembly method matches. Print-in-place figures say a pose-holding gap of 0.20 mm welds shut, because both faces print against each other. A joint printed apart and pushed together cannot fuse, and there 0.20 holds a pose. The two problems use the same units and are different problems.
 - FDM holes print undersize, because the printer pushes material into the hole. Laser cutting is the opposite (the kerf makes holes oversize), so laser clearances do not transfer.
 - Elephant-foot compensation in the slicer is a fit setting, not a cosmetic one. A squashed first layer fattens a post until it no longer enters its hole.
+- Text that is printed needs strokes of two lines. Bold 4 mm text has 0.44 to 0.51 mm strokes, one line of a 0.4 mm nozzle, and prints as wavy single lines. Make printed labels with `labels.number(text, nozzle=base3d.Nozzle(0.4))`, which grows the text to fit (about 7 mm for a 0.4 mm nozzle), and measure any text with `labels.stroke_width`.
 - The slicer can fuse or drop features with no warning. Surfaces closer than the slice gap closing radius (often 0.049 mm by default) are merged into one body, so set it to 0.01 mm. With the Arachne wall generator a feature under about 25% of the nozzle (0.10 mm) is dropped, so a gate drawn too thin does not print and its part is loose. Keep at least 0.6 mm of air between parts that must stay separate.
 
 ## Step 2. Build the joints into the parts

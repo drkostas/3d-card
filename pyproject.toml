@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "3d-card"
-version = "0.4.1"
+version = "0.5.0"
 description = "Turn a set of 3D-printable parts into one printable card: parts gated to a frame like a model-kit sprue, with a check that every part comes off clean. Includes print-in-place joints and printability checks"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Konstantinos Georgiou" }]
 dependencies = [
-  "3d-base>=0.3.0",
+  "3d-base>=0.5.0",
   "numpy>=1.24",
   "trimesh>=4.0",
   "manifold3d>=2.4",

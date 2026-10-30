@@ -126,7 +126,9 @@ BALL_NECK = 0.34          # neck diameter, and its length, as a fraction of the 
 # A neck has a floor of its own. As a fraction alone, a 3 mm ball got a 1.02 mm neck, about two and a
 # half nozzle lines, and on a printed kit those balls snapped off at the neck when they were pushed
 # into their sockets. 2.0 mm is five lines of a 0.4 mm nozzle. A smaller ball then tilts less before
-# its neck meets the rim, so `ball_coupon` reports how far each size turns.
+# its neck meets the rim, so `ball_coupon` reports how far each size turns. The floor is for strength
+# in PLA, not for the nozzle, so it stays 2.0 mm with a finer nozzle: tied to five lines, a 0.2 mm
+# nozzle would give the same 1 mm neck that snapped.
 BALL_NECK_MIN = 2.0
 BALL_WALL = 1.00          # material left around the cavity, so the socket has something to spring
 BALL_SLITS = 4            # relief cuts through the mouth
