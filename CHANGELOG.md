@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.0
+
+- **Fix: a ball socket is cut with the gap it is given.** `joints.female` set `gap` to the general running clearance `CLEAR` (0.30 mm) before its ball branch, so every ball cavity was the ball plus 0.30 mm whatever `gap` was passed, and the documented default `BALL_CLEAR` (0.20 mm) never applied. The rim grip was computed with the same 0.30 mm, so rims came out as asked. Default ball sockets are now 0.10 mm closer round the ball than before, and fit cards that vary the cavity now vary it. A peg, axle or pivot given a `gap` now uses it too.
+- `fit_card` sockets can carry friction ridges: a third number in a fit, `(gap, grip, ridge)`, adds `RIDGES` (4) ridges `RIDGE_W` (0.8 mm) wide standing `ridge` mm in from the cavity wall, midway between the slits and up to `RIDGE_TOP` of the radius above the ball's centre. A ridge taller than the gap rubs the ball, for a joint that should hold a pose in a clean print. `fit_card.ridges(...)` builds them.
+- `footing.ears` makes ears that come off: one layer (`EAR_H` 0.2 mm, was 0.4) reaching only `EAR_OVERLAP` (1.5 mm) under each tip, the rest of the disc beyond the part. Two-layer ears wholly under the ends of a printed axle could not be removed by hand.
+
 ## 0.9.0
 
 - `card3d.footing` judges whether a loose part stays on the plate by the shape of its first layer, not only its area. `footing(mesh)` gives the first layer's area, its widest solid spot (`width_mm`, the diameter of the largest circle inside it), its length, and how much the part grows in the first millimetre up (`growth`), and calls it `narrow` when the widest spot is under `FOOT_MIN_W` (3 mm) and it is either more than `FOOT_MAX_ASPECT` (4) times as long or under a part that grows past `FOOT_MAX_GROWTH` (2) times. A printed snap axle laid on its flat had 19.3 mm2 of first layer, above the area where parts are starved, as one strip under 2 mm wide and 16 mm long under a body nearly three times as wide a millimetre up, and it came loose and was dragged. `ears(mesh)` adds a thin disc (`EAR_D` 7 mm, `EAR_H` 0.4 mm) under each end of the first layer's long axis, the mouse ears that are cut off after printing, and leaves the part above them unchanged; with them the same axle printed and stayed down.

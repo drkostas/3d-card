@@ -34,6 +34,15 @@ def test_a_keel_three_lines_wide_is_not_flagged_for_being_long():
     assert not F.footing(keel)["narrow"]
 
 
+def test_ears_are_one_layer_and_mostly_beyond_the_part():
+    rod = _rod_on_its_flat()
+    eared = F.ears(rod)
+    assert abs(F.EAR_H - 0.2) < 1e-9
+    # the eared first layer reaches past both tips by most of an ear
+    reach = (eared.extents[0] - rod.extents[0]) / 2.0
+    assert abs(reach - (F.EAR_D - F.EAR_OVERLAP)) < 0.2
+
+
 def test_ears_hold_the_rod_and_leave_its_shape():
     rod = _rod_on_its_flat()
     eared = F.ears(rod)

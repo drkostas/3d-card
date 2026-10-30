@@ -262,7 +262,12 @@ def female(kind, size, axis, at, length=None, slit_phase=0.0, gap=None, grip=Non
     material. The pattern is four-fold symmetric, so the useful range is 0 to pi/2.
     """
     L = length if length is not None else _default_length(kind, size)
-    gap = (PIVOT_CLEAR if kind == "pivot" else CLEAR) + (AXLE_PLAY if kind == "axle" else 0.0)
+    # ⛔ THIS LINE USED TO OVERWRITE `gap` FOR EVERY KIND, so a ball socket always had CLEAR (0.30 mm)
+    # round the ball whatever gap was passed, and its documented default BALL_CLEAR (0.20) never
+    # applied. Three printed fit cards meant to vary the cavity all had the same one. The default
+    # now applies only when no gap is given.
+    if gap is None and kind != "ball":
+        gap = (PIVOT_CLEAR if kind == "pivot" else CLEAR) + (AXLE_PLAY if kind == "axle" else 0.0)
     if kind == "ball":
         # The cut is the cavity the ball turns in, the mouth it is pushed through, the channel the
         # neck sweeps as the part is twisted, and the slits that let the mouth open to admit it.

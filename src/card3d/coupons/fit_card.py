@@ -26,6 +26,7 @@ as a limb prints on a kit card, with a thin flat sole so it has a first layer.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -58,7 +59,8 @@ class FitCardSpec:
     #: the ball diameters to test, in mm
     ball_sizes: tuple = (4.0, 5.0, 6.0)
     #: socket letter -> (gap per side in the cavity, share of the joint's default rim grip), or with
-    #: `grip_mm` (gap, rim grip in mm per side)
+    #: `grip_mm` (gap, rim grip in mm per side). A third number adds friction ridges standing that far
+    #: in from the cavity wall (`ridges`); one larger than the gap rubs the ball.
     fits: dict = field(default_factory=_fits)
     #: the second number of each fit is the rim grip itself in mm, the same for every ball size.
     #: A printed card showed the fit follows the rim's grip in mm and not the ball size: sockets with
@@ -115,6 +117,40 @@ def grip_of(spec, size, letter):
     return float(second) if spec.grip_mm else J.ball_grip(size) * second
 
 
+#: friction ridges: how many, their width across, and how far above the ball's centre they reach, as
+#: a share of its radius (they stay below the rim, which does the clicking)
+RIDGES = 4
+RIDGE_W = 0.8
+RIDGE_TOP = 0.3
+
+
+def ridges(size, gap, ridge, centre, count=RIDGES, width=RIDGE_W, phase=None):
+    """Thin ridges on a ball cavity's wall that stand `ridge` mm in from it, to rub a ball that would
+    otherwise turn freely in a clean print. They run from the cavity's floor to `RIDGE_TOP` of the
+    radius above the ball's centre, midway between the joint's slits, so the slits can still spring."""
+    R = size / 2.0
+    outer = R + gap + 0.05                       # into the wall a little, so they join it
+    inner = R + gap - ridge
+    c = np.asarray(centre, float)
+    shell = trimesh.creation.icosphere(subdivisions=4, radius=outer).difference(
+        trimesh.creation.icosphere(subdivisions=4, radius=inner))
+    shell.apply_translation(c)
+    phase = math.pi / J.BALL_SLITS if phase is None else phase
+    out = []
+    for i in range(count):
+        a = 2 * math.pi * i / count + phase
+        slab = trimesh.creation.box(extents=[outer + 0.5, width, 2 * outer + 1.0])
+        slab.apply_translation([(outer + 0.5) / 2.0, 0.0, 0.0])
+        slab.apply_transform(trimesh.transformations.rotation_matrix(a, [0, 0, 1]))
+        top = R * RIDGE_TOP
+        cap = trimesh.creation.box(extents=[2 * outer + 2, 2 * outer + 2, outer + top])
+        cap.apply_translation([0.0, 0.0, top - (outer + top) / 2.0])
+        slab.apply_translation(c)
+        cap.apply_translation(c)
+        out.append(trimesh.boolean.intersection([shell, slab, cap]))
+    return trimesh.boolean.union(out)
+
+
 def socket_geometry(spec, size, letter):
     """(block without label, joint point, axis, outer radius, info). The cavity opens upward with
     its rim `rim_below_top` under the block's top, so the mouth is not a channel as long as the neck."""
@@ -130,7 +166,13 @@ def socket_geometry(spec, size, letter):
     blk = trimesh.creation.cylinder(radius=r, height=H, sections=64)
     blk.apply_translation([0, 0, H / 2.0])
     blk = blk.difference(J.female("ball", size, axis, at, gap=gap, grip=grip, wall=spec.socket_wall))
-    return blk, at, axis, r, {"gap": gap, "grip": round(grip, 3), "top": round(H, 2)}
+    ridge = float(spec.fits[letter][2]) if len(spec.fits[letter]) > 2 else 0.0
+    if ridge > 0:
+        blk = trimesh.boolean.union([blk, ridges(size, gap, ridge, (0.0, 0.0, zc))])
+    info = {"gap": gap, "grip": round(grip, 3), "top": round(H, 2)}
+    if ridge > 0:
+        info["ridge"] = ridge
+    return blk, at, axis, r, info
 
 
 def socket(spec, size, letter):

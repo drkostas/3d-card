@@ -9,8 +9,12 @@ peels from its ends as it cools, the nozzle catches it, and it is dragged across
 
 `footing(mesh)` reads the first layer the way that failure happens: its widest solid spot (the
 diameter of the largest circle that fits inside it), its length, and how much the part grows in the
-first `RISE_MM` above the plate. `ears(mesh)` adds a thin disc under each end of the first layer,
-the mouse ears printers cut off after printing, without changing the part's own shape.
+first `RISE_MM` above the plate. `ears(mesh)` adds a one-layer disc at each end of the first layer,
+the mouse ears printers peel off after printing, without changing the part's own shape.
+
+⛔ EARS UNDER THE PART DO NOT COME OFF. The first ears were two layers thick and sat wholly under the
+ends of a printed axle, and the person could not remove them. An ear is one layer and reaches only
+`EAR_OVERLAP` under the tip, the rest of it beyond the part, so it holds the tip down and peels away.
 
     f = footing(axle)            # {"area_mm2", "width_mm", "length_mm", "growth", "narrow", "why"}
     if f["narrow"]:
@@ -31,9 +35,11 @@ FOOT_MAX_ASPECT = 4.0
 FOOT_MAX_GROWTH = 2.0
 #: how high above the plate the growth is read
 RISE_MM = 1.0
-#: mouse ear size: diameter and thickness (two 0.2 mm layers)
+#: mouse ear size: diameter and thickness (one 0.2 mm layer, so it peels off by hand)
 EAR_D = 7.0
-EAR_H = 0.4
+EAR_H = 0.2
+#: how far an ear reaches under the part's tip; the rest of the disc lies beyond it
+EAR_OVERLAP = 1.5
 
 
 def _section(mesh, z):
@@ -84,11 +90,11 @@ def footing(mesh, layer: float = 0.2) -> dict:
             "growth": round(growth, 2), "narrow": bool(why), "why": "; ".join(why)}
 
 
-def ears(mesh, d: float = EAR_D, h: float = EAR_H, inset: float = 1.5, layer: float = 0.2):
-    """The part with a thin disc of diameter `d` and height `h` under each end of its first layer.
+def ears(mesh, d: float = EAR_D, h: float = EAR_H, overlap: float = EAR_OVERLAP, layer: float = 0.2):
+    """The part with a thin disc of diameter `d` and height `h` at each end of its first layer.
 
-    The ends are the two ends of the first layer's long axis, `inset` in from each tip, so each ear
-    sits under the part and holds it from below. Cut them off after printing."""
+    The ends are the two ends of the first layer's long axis. Each disc reaches `overlap` under the
+    tip and lies beyond it otherwise, so it holds the tip down and peels off by hand."""
     first = _section(mesh, layer / 2.0)
     if first.is_empty:
         raise ValueError("the part has no first layer to put ears under")
@@ -102,7 +108,7 @@ def ears(mesh, d: float = EAR_D, h: float = EAR_H, inset: float = 1.5, layer: fl
     z0 = float(mesh.bounds[0][2])
     parts = [mesh]
     for sgn in (-1.0, 1.0):
-        at = mid + sgn * (half - inset) * u
+        at = mid + sgn * (half - overlap + d / 2.0) * u
         disc = trimesh.creation.cylinder(radius=d / 2.0, height=h, sections=48)
         disc.apply_translation([at[0], at[1], z0 + h / 2.0])
         parts.append(disc)

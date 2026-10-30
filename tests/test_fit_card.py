@@ -60,3 +60,20 @@ def test_a_piece_the_project_adds_gets_a_last_row():
     pieces["axle demo"] = trimesh.creation.box(extents=(20, 4, 4))
     placed = FC.layout(pieces, SPEC)
     assert float(placed["axle demo"].bounds[0][1]) > max(float(m.bounds[0][1]) for n, m in placed.items() if n != "axle demo")
+
+
+def test_ridges_stand_in_from_the_cavity_wall_and_rub_the_ball():
+    import numpy as np
+    import trimesh
+    spec = FC.FitCardSpec(ball_sizes=(5.0,), fits={"X": (0.20, 0.12, 0.30), "P": (0.20, 0.12)}, grip_mm=True,
+                          necks={"2": 0.6}, pegs={}, holes={})
+    ridged, at, axis, _r, info = FC.socket_geometry(spec, 5.0, "X")
+    plain, *_ = FC.socket_geometry(spec, 5.0, "P")
+    assert info["ridge"] == 0.30 and ridged.is_watertight and len(ridged.split(only_watertight=False)) == 1
+    assert ridged.volume > plain.volume
+    # a ball seated in the ridged socket meets the ridges, and in the plain one it does not
+    c = at + axis * FC.J.ball_reach(5.0)
+    ball = trimesh.creation.icosphere(subdivisions=4, radius=2.5)
+    ball.apply_translation(c)
+    assert ridged.intersection(ball).volume > 0.01
+    assert plain.intersection(ball).volume < 1e-3
