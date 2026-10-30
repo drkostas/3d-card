@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - A ball's neck is never thinner than `BALL_NECK_MIN` (2.0 mm, five lines of a 0.4 mm nozzle). As a fraction of the ball alone (`BALL_NECK`, 0.34), a 3 mm ball had a 1.02 mm neck, and on a printed kit those balls snapped off at the neck as they were pushed into their sockets. `ball_neck(size)` gives the diameter. A small ball now tilts less before its neck meets the rim, and `ball_coupon` reports it (a 3 mm ball turns 15 degrees, 4 to 6 mm balls 30).
 - `female("ball", ...)` and `ball_depth` take `gap` (per side, in the cavity), `grip` (per side, at the rim) and `wall`, `male` takes `neck`, and `socket_reach` takes `gap` and `wall`. `ball_coupon.socket_block` and `ball_coupon.check` pass the same values, so a coupon can print and check one ball size in several fits.
