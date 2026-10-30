@@ -113,3 +113,15 @@ def test_a_box_stands(tmp_path):
     pieces = S.convex_pieces(box, "box", tmp_path)
     r = S.stand_test(pieces, tmp_path, seconds=1.0)
     assert r["tilt_deg"] < 5
+
+
+def test_a_ball_socket_is_cut_with_the_gap_it_is_given():
+    import numpy as np
+    from card3d import joints as J
+    for gap in (None, 0.0, 0.10, 0.30):
+        cut = J.female("ball", 5.0, (0, 0, -1), (0, 0, 10), gap=gap)
+        c = np.array([0.0, 0.0, 10.0 - J.ball_reach(5.0)])
+        want = 2.5 + (J.BALL_CLEAR if gap is None else gap)
+        d = np.linalg.norm(cut.vertices - c, axis=1)
+        # the cavity's own vertices lie on the sphere of the ball plus its gap
+        assert abs(float(np.percentile(d, 5)) - want) < 0.02, (gap, np.percentile(d, 5))
