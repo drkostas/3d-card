@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0
+
+- `FitCardSpec(grip_mm=True)` reads the second number of each fit as the rim's grip in mm per side, the same for every ball size, and `fit_card.grip_of(spec, size, letter)` gives it either way. On a printed fit card the fit followed the rim's grip in mm and not the ball size: sockets with 0.07 mm of grip took their ball at 4, 5 and 6 mm, and from 0.088 mm none went in easily, while the default grip, a share of `joints.ball_grip`, grows with the ball.
+- `fit_card.layout` puts any piece a project adds to the card (an axle to try in the tubes, say) in a last row, where before it was left off the card.
+
 ## 0.7.0
 
 - `card3d.coupons.fit_card` builds one print that finds a kit's fits by hand before the kit is printed. For each ball size it prints sockets that differ only in fit (letters A, B, C: gap in the cavity and share of the rim grip) and balls that differ only in neck thickness (numbers 1, 2, 3), and any ball goes into any socket of its size, so fit and strength are read apart. Beside them it prints pegs of several heights with holes of several clearances, and short tubes of several bores for an axle. `FitCardSpec` holds every size, `build` gives the pieces named by what they vary, `layout` lays them as a table, and `checks` measures each socket with its thinnest and thickest neck (goes in past only the rim, holds when pulled, turns 30 degrees all round). Labels are sized for the nozzle (`labels.number(..., nozzle=)`), and every piece is one watertight solid.

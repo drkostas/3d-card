@@ -57,8 +57,14 @@ def _holes():
 class FitCardSpec:
     #: the ball diameters to test, in mm
     ball_sizes: tuple = (4.0, 5.0, 6.0)
-    #: socket letter -> (gap per side in the cavity, share of the joint's default rim grip)
+    #: socket letter -> (gap per side in the cavity, share of the joint's default rim grip), or with
+    #: `grip_mm` (gap, rim grip in mm per side)
     fits: dict = field(default_factory=_fits)
+    #: the second number of each fit is the rim grip itself in mm, the same for every ball size.
+    #: A printed card showed the fit follows the rim's grip in mm and not the ball size: sockets with
+    #: 0.07 mm of grip took their ball at every size, and at 0.088 mm or more none went in easily,
+    #: while the default grip grows with the ball.
+    grip_mm: bool = False
     #: ball number -> mm added to the joint's default neck (`joints.ball_neck`)
     necks: dict = field(default_factory=_necks)
     socket_wall: float = 1.6      # four lines of a 0.4 mm nozzle; 1.0 mm sockets broke on a printed kit
@@ -102,11 +108,18 @@ def _labelled(spec, body, text, at_xy, along=0.0):
     return trimesh.boolean.union([body, piece])
 
 
+def grip_of(spec, size, letter):
+    """The rim's grip per side in mm for one socket: the fit's own number with `grip_mm`, else its
+    share of the joint's default for this ball size."""
+    second = spec.fits[letter][1]
+    return float(second) if spec.grip_mm else J.ball_grip(size) * second
+
+
 def socket_geometry(spec, size, letter):
     """(block without label, joint point, axis, outer radius, info). The cavity opens upward with
     its rim `rim_below_top` under the block's top, so the mouth is not a channel as long as the neck."""
-    gap, share = spec.fits[letter]
-    grip = J.ball_grip(size) * share
+    gap = spec.fits[letter][0]
+    grip = grip_of(spec, size, letter)
     R = size / 2.0
     zc = spec.socket_floor + R + gap                         # the ball's centre, seated
     depth = J.ball_depth(size, gap, grip)
@@ -210,10 +223,13 @@ def build(spec: FitCardSpec | None = None):
 
 def layout(pieces, spec: FitCardSpec | None = None, gap: float = 4.0):
     """The pieces on a card that reads as a table: one row per ball size (its sockets, then its
-    balls), then the pegs and holes, then the tubes. Each piece sits on the plate at z = 0."""
+    balls), then the pegs and holes, then the tubes, then any other piece a project added (an axle
+    to try in the tubes, say) in a last row. Each piece sits on the plate at z = 0."""
     spec = spec or FitCardSpec()
     rows = [[n for n in pieces if n.startswith((f"socket {s:g}", f"ball {s:g}-"))] for s in spec.ball_sizes]
     rows += [[n for n in pieces if n.startswith(("peg ", "hole "))], [n for n in pieces if n.startswith("tube ")]]
+    placed_names = {n for row in rows for n in row}
+    rows.append([n for n in pieces if n not in placed_names])
     placed, y = {}, 0.0
     for row in rows:
         x, row_h = 0.0, 0.0
@@ -235,7 +251,7 @@ def check_pair(spec, size, letter, num, min_turn=30):
     sock, at, axis, _r, _info = socket_geometry(spec, size, letter)
     neck = J.ball_neck(size) + spec.necks[num]
     R = size / 2.0
-    grip = J.ball_grip(size) * spec.fits[letter][1]
+    grip = grip_of(spec, size, letter)
     ballm = J.male("ball", size, axis, at, backset=3.0, neck=neck)
     c = at + axis * J.ball_reach(size)
     squeeze, _where = J.push_in(sock, size, axis, at)
