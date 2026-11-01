@@ -110,6 +110,63 @@ def toolpath(gcode: str, every: dict | None = None):
     return layers, segs
 
 
+#: two variants of a test closer than this in every printed size are one variant
+SAME_PRINT_MM = 0.1
+
+
+def _lines_in(every: dict, z: float, lo, hi) -> np.ndarray:
+    """The extrusion segments of layer `z` whose middles lie in the box `lo` to `hi` (x and y)."""
+    s = np.asarray(every.get(z, ()), dtype=float).reshape(-1, 4)
+    c = (s[:, :2] + s[:, 2:]) / 2
+    return s[(c[:, 0] > lo[0]) & (c[:, 0] < hi[0]) & (c[:, 1] > lo[1]) & (c[:, 1] < hi[1])]
+
+
+def lying_hole(every: dict, lo, hi, line_w: float = 0.42) -> dict:
+    """A hole through a part lying down, as the G-code prints it. `every` is what `toolpath` fills and
+    `lo`, `hi` are the corners of the part on the plate, with the hole running along its longer side.
+    A layer is open when no line passes within `line_w` of the hole's axis. The height moves only in
+    whole layers (`open_layers`, `height`), so a test that varies this hole has to step whole layers.
+    The width is the widest gap across the lines of the middle open layer, less one line."""
+    along_x = (hi[0] - lo[0]) > (hi[1] - lo[1])
+    i = 1 if along_x else 0
+    mid = (lo[i] + hi[i]) / 2
+    zs = sorted(z for z in every if lo[2] < z <= hi[2] + 1e-6)
+    opened = []
+    for z in zs:
+        s = _lines_in(every, z, lo, hi)
+        across = (s[:, i] + s[:, i + 2]) / 2
+        if not len(s) or np.abs(across - mid).min() > line_w:
+            opened.append(z)
+    if not opened:
+        return {"open_layers": 0, "height": 0.0, "width": 0.0}
+    step = min(b - a for a, b in zip(zs[:-1], zs[1:])) if len(zs) > 1 else 0.0
+    s = _lines_in(every, opened[len(opened) // 2], lo, hi)
+    across = np.sort(np.r_[s[:, i], s[:, i + 2]])
+    return {"open_layers": len(opened), "height": round(len(opened) * step, 3),
+            "width": round(float(np.diff(across).max()) - line_w, 3)}
+
+
+def standing_hole(every: dict, lo, hi, z: float, line_w: float = 0.42) -> dict:
+    """A hole standing upright in a part whose round body fills `lo` to `hi`, read on the layer nearest
+    `z`: the diameter is twice the nearest line to the centre, less half a line each side."""
+    near = min(every, key=lambda k: abs(k - z))
+    s = _lines_in(every, near, lo, hi)
+    c = (np.asarray(lo[:2], dtype=float) + np.asarray(hi[:2], dtype=float)) / 2
+    r = np.linalg.norm(np.r_[s[:, :2], s[:, 2:]] - c, axis=1)
+    return {"diameter": round(2 * float(r.min()) - line_w, 3)}
+
+
+def same_print(readings: dict, step: float = SAME_PRINT_MM) -> list:
+    """The pairs of test variants the printer will not tell apart: closer than `step` in every printed
+    size. `readings` maps a variant's name to one size or a tuple of sizes read from the G-code. Run it
+    before printing a test that varies a size. Eight tubes stepped 0.04 mm in the model all printed the
+    same height, with widths within 0.11 mm, and the print could not answer what it was made to ask."""
+    names = list(readings)
+    sizes = {n: np.atleast_1d(np.asarray(readings[n], dtype=float)) for n in names}
+    return [(a, b) for k, a in enumerate(names) for b in names[k + 1:]
+            if np.all(np.abs(sizes[a] - sizes[b]) < step)]
+
+
 #: a move in the air shorter than this is a hop inside one part's outline, not a crossing
 AIR_MIN_MM = 1.0
 #: the spacing of the points a move is read at
