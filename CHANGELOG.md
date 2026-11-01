@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.0
+
+- `slicecheck.lying_hole(every, lo, hi)` and `slicecheck.standing_hole(every, lo, hi, z)` read a hole as the G-code prints it, from the layers `toolpath(gcode, every=...)` collects. A lying hole gives its open layers, height and width, and a standing hole gives its diameter.
+- `slicecheck.same_print(readings, step=0.1)` names the pairs of test variants that are closer than `step` mm in every printed size. On a real slice, tubes modelled 0.04 mm apart came back as one height and widths within 0.09 mm for three of the four bores, and tubes stepped one whole layer came back with no pair.
+
 ## 0.11.0
 
 - `fit_card.layout(..., max_width=240.0)` wraps a row wider than `max_width` mm onto the next line, so a fit card with many tubes or sockets still fits the plate. Ten axle tubes in one row made a card 269 mm wide.

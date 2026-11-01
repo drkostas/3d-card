@@ -162,3 +162,46 @@ def test_more_parts_means_more_crossings():
     few = SC.travels(_two_layers((0, 0), (40, 0)))
     many = SC.travels(_two_layers((0, 0), (40, 0), (80, 0), (0, 40)))
     assert many["crossings"] > few["crossings"] and many["air_mm"] > few["air_mm"]
+
+
+def _lying(bore_layers, width, length=10.0):
+    """Layers of a tube lying along x: sole and roof across the hole, two walls beside it."""
+    every, wall = {}, 2.0
+    total = bore_layers + 2 * 5
+    for i in range(total):
+        z = round(0.2 * (i + 1), 3)
+        if 5 <= i < 5 + bore_layers:
+            every[z] = [(0, -width / 2 - 0.21, length, -width / 2 - 0.21),
+                        (0, width / 2 + 0.21, length, width / 2 + 0.21),
+                        (0, -width / 2 - wall, length, -width / 2 - wall),
+                        (0, width / 2 + wall, length, width / 2 + wall)]
+        else:
+            every[z] = [(0, y / 5, length, y / 5) for y in range(-20, 21)]
+    return every, (0.0, -width / 2 - wall, 0.0), (length, width / 2 + wall, 0.2 * total)
+
+
+def test_lying_hole_reads_height_in_whole_layers_and_width():
+    every, lo, hi = _lying(26, 5.2)
+    h = SC.lying_hole(every, lo, hi)
+    assert h["open_layers"] == 26
+    assert abs(h["height"] - 5.2) < 1e-6
+    assert abs(h["width"] - 5.2) < 0.01
+
+
+def test_standing_hole_reads_diameter_less_half_a_line():
+    every, r = {}, 2.75 + 0.21
+    pts = [(10 + r * np.cos(a), 10 + r * np.sin(a)) for a in np.linspace(0, 2 * np.pi, 97)]
+    every[5.0] = [(*p, *q) for p, q in zip(pts[:-1], pts[1:])]
+    h = SC.standing_hole(every, (6.0, 6.0, 0.0), (14.0, 14.0, 10.0), 5.0)
+    assert abs(h["diameter"] - 5.5) < 0.01
+
+
+def test_same_print_names_variants_the_printer_cannot_tell_apart():
+    # Tubes stepped 0.04 mm: one height, widths within 0.11 mm. Neighbours print alike.
+    alike = {"T16": (5.2, 5.19), "T20": (5.2, 5.22), "T24": (5.2, 5.26), "T28": (5.2, 5.30)}
+    assert SC.same_print(alike) == [("T16", "T20"), ("T16", "T24"), ("T20", "T24"),
+                                    ("T20", "T28"), ("T24", "T28")]
+    # Tubes stepped a whole layer differ in height, and a bare number works too.
+    apart = {"L50": (5.0, 4.98), "L52": (5.2, 5.19), "L54": (5.4, 5.40)}
+    assert SC.same_print(apart) == []
+    assert SC.same_print({"S51": 5.07, "S53": 5.27, "S55": 5.47}) == []
