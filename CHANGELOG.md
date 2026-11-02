@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.0
+
+- A fit card's tube bore can be `(width, height)` in mm as well as one diameter. A lying hole's height prints only in whole layers, while its width does not, so `(5.1, 5.2)` gives a hole that 0.2 mm layers can print and that is still 5.1 mm across. `fit_card.bore_size` reads either form.
+
 ## 0.12.0
 
 - `slicecheck.lying_hole(every, lo, hi)` and `slicecheck.standing_hole(every, lo, hi, z)` read a hole as the G-code prints it, from the layers `toolpath(gcode, every=...)` collects. A lying hole gives its open layers, height and width, and a standing hole gives its diameter.

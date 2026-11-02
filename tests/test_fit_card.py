@@ -1,3 +1,5 @@
+import numpy as np
+
 from base3d.nozzle import Nozzle
 
 from card3d import labels as LB
@@ -89,3 +91,26 @@ def test_a_row_too_wide_for_the_plate_wraps():
     assert card.extents[0] <= 120.0 + 1e-6
     rows = {round(float(placed[f"tube T{h}"].bounds[0][1]), 3) for h in range(21, 31)}
     assert len(rows) >= 2
+
+
+def test_a_lying_bore_can_be_narrower_than_it_is_tall():
+    spec = FC.FitCardSpec(ball_sizes=(), fits={}, necks={}, pegs={}, holes={},
+                          tube_bores={"W": (5.1, 5.2), "R": 5.2})
+    pieces, info = FC.build(spec)
+    assert info["tube W"]["bore"] == (5.1, 5.2) and info["tube R"]["bore"] == 5.2
+    for name in ("tube W", "tube R"):
+        m = pieces[name]
+        assert m.is_watertight and len(m.split(only_watertight=False)) == 1, name
+    # the hole read from a cut across the tube's middle: as wide and as tall as asked
+    m = pieces["tube W"]
+    cut = m.section(plane_origin=[0.0, 0.0, 3.0], plane_normal=[0, 1, 0])
+    loops = sorted(cut.discrete, key=lambda v: float(np.ptp(v[:, 0])))
+    hole = loops[0]
+    assert abs(float(np.ptp(hole[:, 0])) - 5.1) < 0.02
+    assert abs(float(np.ptp(hole[:, 2])) - 5.2) < 0.02
+
+
+def test_a_bore_must_have_a_size():
+    import pytest
+    with pytest.raises(ValueError):
+        FC.bore_size((5.1, 0.0))
