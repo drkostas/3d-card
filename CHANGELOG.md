@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.1
+
+- **Fix: the prime tower is not read as part of the card.** `slicecheck.toolpath` leaves out the extrusion of the `Prime tower` and `Wipe tower` features. On a slice in two colours the tower pulled `placed_as_sliced` off the card, and each colour change purges into it, so a layer with a change read as the largest and `first_layer_is_largest` failed.
+
 ## 0.15.0
 
 - `threemf.write(path, [(mesh, filament, name), ...], nozzles=[1, 2])` writes one object whose parts each print with their own filament, for a card in two colours (a white card with black details inlaid flush). The plate's manual filament map says which nozzle each filament uses, and a plain plate thumbnail is included. `threemf.filaments(path)` reads both back. The file names no slicer as its author, because a 3MF that does is read as that slicer's project and needs a full settings file.
