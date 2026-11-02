@@ -81,7 +81,9 @@ class FitCardSpec:
     #: hole number -> diametral clearance round the peg, in mm
     holes: dict = field(default_factory=_holes)
     hole_depth: float = 7.0
-    #: tube name -> bore in mm; empty for no tubes
+    #: tube name -> bore in mm, or (width, height) in mm for a lying hole whose width and height
+    #: differ; empty for no tubes. A lying hole's height prints in whole layers, its width does not,
+    #: so (5.1, 5.2) gives a hole a 0.2 mm layer can print that is still 5.1 mm across.
     tube_bores: dict = field(default_factory=dict)
     tube_length: float = 9.0
     tube_wall: float = 1.6
@@ -231,17 +233,30 @@ def hole(spec, num):
 
 def tube(spec, name):
     """A short tube lying on its side along y, with a flat sole, and its label."""
-    bore = spec.tube_bores[name]
+    width, height = bore_size(spec.tube_bores[name])
     L = spec.tube_length
-    ro = bore / 2.0 + spec.tube_wall
-    t = trimesh.creation.cylinder(radius=ro, height=L, sections=64).difference(
-        trimesh.creation.cylinder(radius=bore / 2.0, height=L + 2.0, sections=64))
+    ro = max(width, height) / 2.0 + spec.tube_wall
+    hole = trimesh.creation.cylinder(radius=height / 2.0, height=L + 2.0, sections=64)
+    hole.apply_scale([width / height, 1.0, 1.0])     # across the tube; its y becomes the height
+    t = trimesh.creation.cylinder(radius=ro, height=L, sections=64).difference(hole)
     t.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
     t.apply_translation([0, 0, ro - spec.tube_sole])
     floor = trimesh.creation.box(extents=[50, 50, 20])
     floor.apply_translation([0, 0, -10.0])
     t = t.difference(floor)
-    return _labelled(spec, t, name, (ro - 1.5, 0.0)), {"bore": round(bore, 2), "length": round(L, 2)}
+    bore = round(width, 2) if width == height else (round(width, 2), round(height, 2))
+    return _labelled(spec, t, name, (ro - 1.5, 0.0)), {"bore": bore, "length": round(L, 2)}
+
+
+def bore_size(bore):
+    """(width, height) in mm of a tube bore given as one diameter or as (width, height)."""
+    if isinstance(bore, (tuple, list)):
+        w, h = (float(v) for v in bore)
+    else:
+        w = h = float(bore)
+    if w <= 0 or h <= 0:
+        raise ValueError(f"a bore needs a positive width and height, got {bore!r}")
+    return w, h
 
 
 def build(spec: FitCardSpec | None = None):
