@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.0
+
+- `threemf.write(path, [(mesh, filament, name), ...], nozzles=[1, 2])` writes one object whose parts each print with their own filament, for a card in two colours (a white card with black details inlaid flush). The plate's manual filament map says which nozzle each filament uses, and a plain plate thumbnail is included. `threemf.filaments(path)` reads both back. The file names no slicer as its author, because a 3MF that does is read as that slicer's project and needs a full settings file.
+
 ## 0.14.0
 
 - `slicecheck.nozzles_used(gcode)` reads which nozzle prints each filament from the G-code's own `M620.17` lines, as `{filament: extruder}` counted from 1. On a two-nozzle printer a slicer can write the `filament_map` you asked for into the file and still slice with another map, so the setting is not proof of where a filament prints.

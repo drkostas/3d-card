@@ -1,2 +1,2 @@
 """Printable kit cards from 3D parts, with print-in-place joints and printability checks."""
-__version__ = "0.14.0"
+__version__ = "0.15.0"
