@@ -223,3 +223,18 @@ def test_nozzles_used_skips_an_unused_nozzle():
     from card3d import slicecheck as SC
     g = "; physical_extruder_map = 1,0\nM620.17 T1 S220 L0\nM620.17 T0 S220 L-1\n"
     assert SC.nozzles_used(g) == {1: 1}
+
+
+def test_the_prime_tower_is_not_read_as_the_card():
+    from card3d import slicecheck as SC
+    g = "\n".join([
+        "; CHANGE_LAYER", "; Z_HEIGHT: 0.2", "M83",
+        "; FEATURE: Outer wall", "G1 X0 Y0", "G1 X10 Y0 E1.0",
+        "; FEATURE: Prime tower", "G1 X100 Y100", "G1 X130 Y100 E5.0",
+        "; CHANGE_LAYER", "; Z_HEIGHT: 0.4",
+        "; FEATURE: Prime tower", "G1 X100 Y100", "G1 X130 Y100 E9.0",
+        "; FEATURE: Outer wall", "G1 X0 Y0", "G1 X10 Y0 E0.5",
+    ])
+    layers, segs = SC.toolpath(g)
+    assert [round(f, 3) for _z, f in layers] == [1.0, 0.5]
+    assert all(s[4] != "Prime tower" for s in segs) and len(segs) == 1

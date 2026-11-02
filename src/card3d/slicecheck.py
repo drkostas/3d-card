@@ -83,9 +83,17 @@ def _arc(x, y, nx, ny, i, j, clockwise, step_mm=0.5):
             for k in range(n)]
 
 
+#: features that print the prime tower, not the card: left out of every reading of the card
+TOWER_FEATURES = ("Prime tower", "Wipe tower")
+
+
 def toolpath(gcode: str, every: dict | None = None):
     """Per layer: (z, filament mm) and the first layer's extrusion segments with their feature. Pass
-    a dict as `every` to have each layer's extrusion segments put in it, keyed by the layer's z."""
+    a dict as `every` to have each layer's extrusion segments put in it, keyed by the layer's z.
+
+    The prime tower of a slice in two or more colours is left out (`TOWER_FEATURES`): it is not part
+    of the card, so it would pull `placed_as_sliced` off the card, and each colour change purges into
+    it, which would make a layer with a change read as the largest."""
     layers, segs = [], []
     x = y = z = 0.0
     e_rel, feature, layer = True, "", 0
@@ -114,7 +122,7 @@ def toolpath(gcode: str, every: dict | None = None):
                     re.fullmatch(r"-?(\d+\.?\d*|\.\d+)", w[1:]))   # Bambu writes .0321, no leading zero
         nx, ny = vals.get("X", x), vals.get("Y", y)
         e = vals.get("E", 0.0)
-        if e > 0 and e_rel:
+        if e > 0 and e_rel and feature not in TOWER_FEATURES:
             cur += e
             # Round walls are arcs. The slicer fits arcs (G2 clockwise, G3 counter-clockwise, centre
             # at I, J from the start), and a full circle is one arc that ends where it starts: read as
