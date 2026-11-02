@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.0
+
+- `slicecheck.nozzles_used(gcode)` reads which nozzle prints each filament from the G-code's own `M620.17` lines, as `{filament: extruder}` counted from 1. On a two-nozzle printer a slicer can write the `filament_map` you asked for into the file and still slice with another map, so the setting is not proof of where a filament prints.
+
 ## 0.13.0
 
 - A fit card's tube bore can be `(width, height)` in mm as well as one diameter. A lying hole's height prints only in whole layers, while its width does not, so `(5.1, 5.2)` gives a hole that 0.2 mm layers can print and that is still 5.1 mm across. `fit_card.bore_size` reads either form.
