@@ -8,6 +8,7 @@ card's mesh (`check`, `coverage`):
 
 - every setting you asked for is in the G-code,
 - the slice is for the plate you meant,
+- each filament prints on the nozzle you meant (`nozzles_used`),
 - the first layer carries more filament than any other layer, since a card that starts in the air
   lays a few mm on layer 1 and hundreds on layer 4,
 - every island of the card on the plate gets first-layer lines and a brim ring,
@@ -42,6 +43,27 @@ def read_3mf(path: pathlib.Path) -> dict:
 def settings_in(gcode: str) -> dict:
     """The `; key = value` settings block the slicer writes into the G-code."""
     return {m.group(1): m.group(2).strip() for m in re.finditer(r"^; ([a-z0-9_]+) = (.*)$", gcode, re.M)}
+
+
+def nozzles_used(gcode: str) -> dict:
+    """{filament number: extruder number}, both counted from 1, read from the G-code's moves.
+
+    On a two-nozzle Bambu printer (the X2D) the slicer starts each nozzle with a line
+    `M620.17 T<physical nozzle> S<temperature> L<filament index>`, and `; physical_extruder_map`
+    turns the physical nozzle back into the extruder the slicer counts (1 is the left one on the
+    X2D). Read the nozzle here rather than from the `filament_map` setting: a slicer can write
+    `filament_map` into the file and still slice with another map, so the setting says what was
+    asked and these lines say what will print.
+    """
+    st = settings_in(gcode)
+    phys = [int(v) for v in st.get("physical_extruder_map", "").split(",") if v.strip().lstrip("-").isdigit()]
+    used = {}
+    for m in re.finditer(r"^\s*M620\.17 T(\d+)\b[^\n]*?\bL(-?\d+)", gcode, re.M):
+        t, f = int(m.group(1)), int(m.group(2))
+        if f < 0:
+            continue
+        used[f + 1] = (phys.index(t) if t in phys else t) + 1
+    return used
 
 
 def _arc(x, y, nx, ny, i, j, clockwise, step_mm=0.5):

@@ -205,3 +205,21 @@ def test_same_print_names_variants_the_printer_cannot_tell_apart():
     apart = {"L50": (5.0, 4.98), "L52": (5.2, 5.19), "L54": (5.4, 5.40)}
     assert SC.same_print(apart) == []
     assert SC.same_print({"S51": 5.07, "S53": 5.27, "S55": 5.47}) == []
+
+
+def test_nozzles_used_reads_the_moves_not_the_setting():
+    from card3d import slicecheck as SC
+    g = "\n".join([
+        "; filament_map = 2,1",                       # what was asked, which the slicer ignored
+        "; physical_extruder_map = 1,0",
+        "    M620.17 T0 S{nozzle_temperature_initial_layer[x]} L{first}",   # template text in settings
+        "    M620.17 T0 S220 L1",
+        "    M620.17 T1 S220 L0",
+    ])
+    assert SC.nozzles_used(g) == {1: 1, 2: 2}
+
+
+def test_nozzles_used_skips_an_unused_nozzle():
+    from card3d import slicecheck as SC
+    g = "; physical_extruder_map = 1,0\nM620.17 T1 S220 L0\nM620.17 T0 S220 L-1\n"
+    assert SC.nozzles_used(g) == {1: 1}
