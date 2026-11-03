@@ -20,8 +20,11 @@ Main entry points:
     round_trip  snip a built card and match every piece back to its part
     export      build and write the card to an STL file
 """
+import hashlib
 import json
 import pathlib
+import threading
+from collections import OrderedDict
 
 import numpy as np
 import trimesh
@@ -103,6 +106,57 @@ def _despeckle(mesh):
     return trimesh.util.concatenate(keep) if len(keep) > 1 else keep[0]
 
 
+OUTLINE_CACHE = 1024     # how many part outlines are kept for reuse, and 0 keeps none
+_OUTLINES = OrderedDict()                # mesh fingerprint -> (footprint array, outline polygon)
+_OUTLINES_LOCK = threading.Lock()
+
+
+def _mesh_key(mesh):
+    """A fingerprint of everything `footprint` reads from a mesh: its vertices, faces and face normals,
+    byte for byte. Moving, turning or editing a mesh changes the bytes, so it changes the key."""
+    h = hashlib.blake2b(digest_size=20)
+    for a in (mesh.vertices, mesh.faces, mesh.face_normals):
+        a = np.ascontiguousarray(a)
+        h.update(f"{a.dtype.str}{a.shape}".encode())
+        h.update(a.tobytes())
+    return h.digest()
+
+
+def clear_outline_cache():
+    """Forget every outline kept by `footprint`."""
+    with _OUTLINES_LOCK:
+        _OUTLINES.clear()
+
+
+def _cached_outline(mesh):
+    """(footprint array, outline polygon) for `mesh`, computed once per distinct mesh.
+
+    A nested build asks for the outline of the same part, at the same place and turn, in every nest
+    try and in every tag pass. The outline depends only on the mesh's bytes, so it is kept under
+    their fingerprint and reused. Only an exact match is reused. An outline moved or turned with the
+    part would differ in the last digits from one projected afresh, because the merge snaps to a
+    fixed grid. An outline that fell back to the bounding box is not kept, so it is tried again.
+    """
+    if OUTLINE_CACHE <= 0:
+        fp, _exact = _footprint(mesh)
+        return fp, Polygon(fp).buffer(0)
+    key = _mesh_key(mesh)
+    with _OUTLINES_LOCK:
+        hit = _OUTLINES.get(key)
+        if hit is not None:
+            _OUTLINES.move_to_end(key)
+            return hit
+    fp, exact = _footprint(mesh)
+    fp.setflags(write=False)
+    got = (fp, Polygon(fp).buffer(0))
+    if exact:
+        with _OUTLINES_LOCK:
+            _OUTLINES[key] = got
+            while len(_OUTLINES) > OUTLINE_CACHE:
+                _OUTLINES.popitem(last=False)
+    return got
+
+
 def footprint(mesh):
     """The whole part's shadow on the frame plane, which is the space it actually occupies.
 
@@ -116,6 +170,12 @@ def footprint(mesh):
     box was used instead. That box is up to three times the part's real shadow (a C-shaped clip, a
     board lying on its side), so a nest packed round it wasted the room the outline was meant to save.
     """
+    return np.array(_cached_outline(mesh)[0])
+
+
+def _footprint(mesh):
+    """`footprint` computed afresh: (outline points, True), or (bounding box, False) when the merge
+    gave no polygon."""
     try:
         import shapely
         tri = np.asarray(mesh.triangles)[:, :, :2]
@@ -131,12 +191,12 @@ def footprint(mesh):
             if g.geom_type == "MultiPolygon":
                 g = max(g.geoms, key=lambda q: q.area)
             if g.geom_type == "Polygon" and not g.is_empty:
-                return np.asarray(g.exterior.coords)[:-1]
+                return np.asarray(g.exterior.coords)[:-1], True
     except Exception:
         pass
     b = mesh.bounds
     return np.array([[b[0][0], b[0][1]], [b[1][0], b[0][1]],
-                     [b[1][0], b[1][1]], [b[0][0], b[1][1]]])
+                     [b[1][0], b[1][1]], [b[0][0], b[1][1]]]), False
 
 
 def low_edge(mesh, height=None):
@@ -1012,7 +1072,7 @@ NEST_ALIGN_MM = 3.0      # how much longer a runner may be when it continues a l
 
 
 def _outline(mesh):
-    return Polygon(footprint(mesh)).buffer(0)
+    return _cached_outline(mesh)[1]
 
 
 def nest_outlines(parts, width=100.0, corridor=NEST_CORRIDOR, step=NEST_STEP, frame_w=NEST_FRAME_W,

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.1
+
+- **A nested card builds faster, and the card is the same.** A nested build asked for the outline of each part again in every nest try and in every tag pass, and each outline merges thousands of triangles. `footprint` now keeps each outline under a fingerprint of the mesh's vertices, faces and face normals, and gives it back when the same mesh asks again. Only an exact match is reused, so a part moved, turned or edited gets a fresh outline, and the placements, gates, tags and notes are the ones the build gave before. On a nested card of 19 parts, `best_card` took 179 s where it took 388 s and returned the same card, byte for byte. On a 15-part test kit the build projected 69 outlines where it projected 465. `OUTLINE_CACHE` sets how many outlines are kept (0 keeps none) and `clear_outline_cache()` forgets them.
+
 ## 0.17.0
 
 - **Fix: a nested card no longer leaves a part's number beside an identical part when more room would cure it.** When a part's tag found no place nearer it than any other part, the nest was laid again with more room round that part alone. With identical parts (four wheels from one mesh) the nest lays them out alike, so the next try put another wheel in the same crowded place, the tries ran out one wheel at a time, and a wheel's number could end up nearer another wheel than its own. Parts of one shape now get the room together. On a small test kit of six identical wheels the nest settles in 3 tries where it needed 6.
