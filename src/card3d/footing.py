@@ -102,13 +102,18 @@ def ears(mesh, d: float = EAR_D, h: float = EAR_H, overlap: float = EAR_OVERLAP,
     c = np.asarray(rect.exterior.coords)[:4]
     e1, e2 = c[1] - c[0], c[2] - c[1]
     axis = e1 if np.linalg.norm(e1) >= np.linalg.norm(e2) else e2
-    half = float(np.linalg.norm(axis)) / 2.0
-    u = axis / (2.0 * half)
-    mid = np.asarray(rect.centroid.coords[0])
+    u = axis / float(np.linalg.norm(axis))
+    # ⛔ AT THE FIRST LAYER'S OWN ENDS, NOT THE RECTANGLE'S. On a curved part (an arm) the ends of
+    # the first layer lie off the rectangle's centre line, and a disc on that line missed the part.
+    # Each ear is centred beyond the farthest point of the first layer along its long axis.
+    geoms = getattr(first, "geoms", [first])
+    pts = np.vstack([np.asarray(g.exterior.coords)[:, :2] for g in geoms])
+    proj = pts @ u
     z0 = float(mesh.bounds[0][2])
     parts = [mesh]
     for sgn in (-1.0, 1.0):
-        at = mid + sgn * (half - overlap + d / 2.0) * u
+        tip = pts[int(np.argmax(sgn * proj))]
+        at = tip + sgn * (d / 2.0 - overlap) * u
         disc = trimesh.creation.cylinder(radius=d / 2.0, height=h, sections=48)
         disc.apply_translation([at[0], at[1], z0 + h / 2.0])
         parts.append(disc)
