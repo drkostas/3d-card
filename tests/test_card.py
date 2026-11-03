@@ -323,3 +323,54 @@ def test_every_gate_on_a_card_is_necked_at_the_part(kit):
     for g, (p0, p1) in zip(got["gate_solids"], got["gate_axes"]):
         v = _section_at(g, p0, p1, T.NECK_L / 2)
         assert np.ptp(v[:, 2]) <= T.NECK_H + 1e-6
+
+
+def _twin_kit():
+    """Six identical wheels, two pairs of identical small bars and five plates, nested 45 mm wide."""
+    def disc(r):
+        m = trimesh.creation.cylinder(radius=r, height=4.0, sections=48)
+        m.apply_translation((0, 0, 2.0))
+        return m
+
+    def bar(a, b):
+        m = trimesh.creation.box(extents=(a, b, 4.0))
+        m.apply_translation((0, 0, 2.0))
+        return m
+    parts = {f"wheel_{i}": disc(4.5) for i in range(6)}
+    parts.update({f"pin_{i}": bar(11.0, 2.5) for i in range(2)})
+    parts.update({f"peg_{i}": bar(8.0, 3.5) for i in range(2)})
+    parts.update({f"plate_{j}": bar(a, b) for j, (a, b) in
+                  enumerate([(21.0, 12.0), (20.0, 14.0), (26.0, 5.0), (27.0, 5.0), (24.0, 7.0)])})
+    return lambda: ({n: m.copy() for n, m in parts.items()}, [], [])
+
+
+def test_parts_of_one_shape_are_grouped():
+    wheel = trimesh.creation.cylinder(radius=4.0, height=3.0, sections=48)
+    turned = wheel.copy()
+    turned.apply_transform(trimesh.transformations.rotation_matrix(1.1, (1, 0, 0)))
+    turned.apply_translation((30, -12, 5))
+    bigger = trimesh.creation.cylinder(radius=4.2, height=3.0, sections=48)
+    block = trimesh.creation.box(extents=(8, 8, 3))
+    got = T.same_shape({"a": wheel, "b": turned, "c": bigger, "d": block})
+    assert got["a"] == got["b"] == ["a", "b"]
+    assert got["c"] == ["c"] and got["d"] == ["d"]
+
+
+def test_identical_parts_get_more_room_together(monkeypatch):
+    # Room given to one crowded wheel only hands its place to the next identical wheel, so the
+    # tries ran out one wheel at a time and a wheel's number was left beside another wheel.
+    monkeypatch.setattr(T, "NEST_TRIES", 3)
+    got = T.build(verbose=False, source=_twin_kit(), nest=True, nest_width=45.0, seat=False)
+    assert set(got["tags"]) == set(got["parts"]) and not got["weak"]
+    for n, (own, other, who) in T.tag_clearance(got["tags"], got["parts"]).items():
+        assert own + T.NEST_TAG_OWN <= other, (n, own, other, who)
+    assert got["crowded_tags"] == []
+
+
+def test_a_crowded_tag_left_after_the_last_try_is_reported(monkeypatch):
+    monkeypatch.setattr(T, "NEST_TRIES", 1)
+    got = T.build(verbose=False, source=_twin_kit(), nest=True, nest_width=45.0, seat=False)
+    want = T.crowded_tags(got["tags"], got["parts"], got["numbers"])
+    assert want and got["crowded_tags"] == want
+    said = " ".join(x for x in got["notes"] if "number tag" in x)
+    assert all(n in said for n in want)

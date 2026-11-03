@@ -1003,6 +1003,7 @@ NEST_TAG_OWN = 2.0       # how much nearer its own part than any other a number 
 NEST_TAG_APART = 3.0     # the least gap between two number tags, so two numbers never read as one
 NEST_TRIES = 6           # how many times the nest is laid again with more room round crowded parts
 NEST_TAG_STUB = 8.0      # the longest stub that may carry a number tag out to open space beside its part
+SAME_SHAPE_TOL = 1e-3    # relative difference in volume, area and principal moments under which two parts are one shape
 PLATE_H = 9.0            # a name plate along the top edge, when the card has a name
 PLATE_TEXT_H = 6.5
 HOLDS = ((20.0, 2), (40.0, 3), (float("inf"), 4))   # how many runners hold a part, by its size
@@ -1291,6 +1292,42 @@ def number_tags(placed, numbers, network, shape=None, gap=NEST_GAP, z=FRAME_T, r
     return out, missing
 
 
+def same_shape(parts, tol=SAME_SHAPE_TOL):
+    """The parts that share a shape: {name: [every part with that shape, itself included]}.
+
+    Two parts are one shape when their volume, surface area and principal moments of inertia agree
+    within `tol`, relative. None of these change when a part is moved or turned, so four wheels made
+    from one mesh and placed at four corners are one group. A mirror image passes too, which suits
+    the nest, since it lays out a part and its mirror image alike.
+    """
+    def sig(m):
+        moments = np.sort(np.asarray(m.principal_inertia_components, float))
+        return np.r_[abs(float(m.volume)), float(m.area), moments]
+    seen = []                                  # (signature, [names])
+    for n in sorted(parts):
+        s = sig(parts[n])
+        for t, names in seen:
+            if np.all(np.abs(s - t) <= tol * np.maximum(np.abs(s), np.abs(t)) + 1e-9):
+                names.append(n)
+                break
+        else:
+            seen.append((s, [n]))
+    return {n: list(names) for _s, names in seen for n in names}
+
+
+def crowded_tags(tags, placed, numbers=None):
+    """The parts whose number tag breaks the nesting rule: [name], sorted.
+
+    A part is named when its tag sits less than `NEST_TAG_OWN` nearer its own part than any other
+    (`tag_clearance`), and, when `numbers` is given, when it is numbered but has no tag at all.
+    `tags` is `build`'s {name: [x0, y0, x1, y1]} and `placed` its parts.
+    """
+    bad = {n for n, (own, other, _w) in tag_clearance(tags, placed).items() if own + NEST_TAG_OWN > other}
+    if numbers is not None:
+        bad |= {n for n in numbers if n in placed and n not in tags}
+    return sorted(bad)
+
+
 def reading_numbers(names, rows=None):
     """The number of each part: {name: number}, from 1.
 
@@ -1325,8 +1362,8 @@ def _tag_box(stamp):
 
 
 def _unclear_tags(tags, placed):
-    return [n for n, (a, b, _w) in tag_clearance(
-        {n: _tag_box(s) for n, (_q, s) in tags.items()}, placed).items() if a + NEST_TAG_OWN > b]
+    # on the boxes rounded as `build` returns them, so the nest and its caller judge alike
+    return crowded_tags({n: [round(v, 3) for v in _tag_box(s)] for n, (_q, s) in tags.items()}, placed)
 
 
 def tag_clearance(tags, placed):
@@ -1571,7 +1608,11 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
         # Each try reshuffles the whole nest, so a later one can be worse; the best is kept: fewest
         # weak parts, then fewest crowded tags, then fewest parts off their reading turn, then the
         # shortest card.
+        # Parts of one shape (`same_shape`) get the room together. The nest lays them out alike, so
+        # room given to one of four identical wheels only hands the crowded place to the next wheel,
+        # and the tries run out one wheel at a time.
         numbers = reading_numbers(parts, rows)
+        twins = same_shape(parts)
         tries = []
         for _try in range(NEST_TRIES):
             placed, moved, (W, H) = nest_outlines(parts, nest_width, top=PLATE_H if plate else 0.0,
@@ -1586,7 +1627,7 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
                            untagged)))
             if not crowded:
                 break
-            for n in crowded:
+            for n in sorted({m for c in crowded for m in twins.get(c, [c])}):
                 room[n] = room.get(n, NEST_CORRIDOR) + 1.5
         key, kept = min(tries, key=lambda kv: kv[0])
         (placed, moved, W, H, plate_poly, plate_text, net, holds, weak, outer, tags, untagged) = kept
@@ -1640,7 +1681,7 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
     # snipped (`reading_numbers`). A nested card placed its tags with its runners.
     if not nest:
         numbers = reading_numbers(shapes, rows)
-        holds, weak, tags = {}, [], {}
+        holds, weak, tags, crowded = {}, [], {}, []
     if nest:
         from shapely.ops import unary_union
         flat = unary_union([net] + [q for q, _s in tags.values()])
@@ -1651,8 +1692,12 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
             notes.append(f"held at fewer than two points, or not from two sides: {', '.join(weak)}")
         if untagged:
             notes.append(f"no room for a number tag beside: {', '.join(untagged)}")
-        clear = tag_clearance({n: _tag_box(s) for n, (_q, s) in tags.items()}, placed)
-        unclear = [f"{n} (nearer {clear[n][2]})" for n in sorted(_unclear_tags(tags, placed))]
+        # Measured on the very boxes the build returns, so `crowded` and `tag_clearance` on the
+        # result can never disagree.
+        boxes = {n: [round(v, 3) for v in _tag_box(s)] for n, (_q, s) in tags.items()}
+        clear = tag_clearance(boxes, placed)
+        crowded = crowded_tags(boxes, placed, numbers)
+        unclear = [f"{n} (nearer {clear[n][2]})" for n in crowded if n in clear]
         if unclear:
             notes.append(f"number tag nearer another part than its own: {', '.join(unclear)}")
         bars = []
@@ -1820,6 +1865,7 @@ def build(inner_w=200.0, verbose=True, with_base=False, orient=False, pack=True,
     return {"card": card, "parts": placed, "gates": gates, "gate_solids": gate_solids,
             "gate_axes": gate_axes, "frame": frame_mesh, "numbers": numbers,
             "tags": {n: [round(v, 3) for v in _tag_box(s)] for n, (_q, s) in tags.items()},
+            "crowded_tags": crowded,
             "size": (W, H, tall), "fits_bed": bool(fits), "bodies": bodies,
             "first_layer_mm2": float(first_layer),
             "notes": notes, "joints": made, "orient": orient_log, "seat": seat_log,
