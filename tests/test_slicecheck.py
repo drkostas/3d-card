@@ -14,14 +14,15 @@ def _square(x0, y0, x1, y1, feature):
     return out
 
 
-def _gcode(rect, settings, layers=3):
+def _gcode(rect, settings, layers=3, brim=True):
     """A small sliced card: a settings block, a brim and a wall on layer 1, thinner layers above."""
     x0, y0, x1, y1 = rect
     g = [f"; {k} = {v}" for k, v in settings.items()] + ["M83"]
     for i in range(layers):
         g += ["; CHANGE_LAYER", f"; Z_HEIGHT: {0.2 * (i + 1):.1f}"]
         if i == 0:
-            g += _square(x0 - 3, y0 - 3, x1 + 3, y1 + 3, "Brim")
+            if brim:
+                g += _square(x0 - 3, y0 - 3, x1 + 3, y1 + 3, "Brim")
             g += _square(x0 + 0.2, y0 + 0.2, x1 - 0.2, y1 - 0.2, "Outer wall")
             g += _square(x0 + 0.6, y0 + 0.6, x1 - 0.6, y1 - 0.6, "Inner wall")
         else:
@@ -238,3 +239,64 @@ def test_the_prime_tower_is_not_read_as_the_card():
     layers, segs = SC.toolpath(g)
     assert [round(f, 3) for _z, f in layers] == [1.0, 0.5]
     assert all(s[4] != "Prime tower" for s in segs) and len(segs) == 1
+
+
+def test_a_reprime_at_the_prime_tower_is_not_read_as_the_card():
+    # After the card's last line on a layer the slicer travels to the prime tower and pushes the
+    # retracted filament back with no move, before it writes the tower's feature tag. That push still
+    # carries the card's feature. Read as a line it put a dot of the card 40 mm to its left, and the
+    # card could not be lined up with its slice.
+    g = _gcode((100, 50, 130, 62), SETTINGS).splitlines()
+    at = g.index("; Z_HEIGHT: 0.2") + 1 + 12               # after layer 1's brim and outer wall
+    g[at:at] = ["G1 E-.8", "G1 X60 Y56", "G1 E.4 F1800",
+                "; FEATURE: Prime tower", "G1 X60 Y56", "G1 X70 Y56 E1.0", "; FEATURE: Inner wall"]
+    sliced = {"gcode": "\n".join(g) + "\n", "slice_info": "", "plate_png": None}
+    _layers, segs = SC.toolpath(sliced["gcode"])
+    assert min(min(a, c) for a, _b, c, _d, _f in segs) > 90
+    card, turns = SC.placed_as_sliced(_card(), sliced)
+    rep = SC.check(sliced, card, overrides={"brim_width": "5"})
+    assert turns == 0 and rep["lined_up"] and rep["ok"], rep
+    assert np.allclose(card.bounds[0][:2], [100, 50], atol=0.01), card.bounds
+
+
+def test_a_push_with_no_move_is_not_counted_as_filament():
+    g = "M83\n; CHANGE_LAYER\n; Z_HEIGHT: 0.2\n; FEATURE: Outer wall\nG0 X0 Y0\nG1 E.4\nG1 X10 Y0 E1.0\n"
+    layers, segs = SC.toolpath(g)
+    assert [round(f, 3) for _z, f in layers] == [1.0] and len(segs) == 1
+
+
+def _no_brim_gcode(brim=False, settings=None):
+    """A card printed with no brim whose second layer carries more filament than its first."""
+    settings = settings or {**SETTINGS, "brim_type": "no_brim"}
+    g = _gcode((100, 50, 130, 62), settings, brim=brim).splitlines()
+    at = g.index("; Z_HEIGHT: 0.4") + 1
+    g[at:at] = _square(100.6, 50.6, 129.4, 61.4, "Sparse infill") + _square(101, 51, 129, 61, "Sparse infill")
+    return {"gcode": "\n".join(g) + "\n", "slice_info": "", "plate_png": None}
+
+
+def test_a_card_printed_with_no_brim_passes_when_no_brim_was_asked_for():
+    asked = [({"brim_type": "no_brim"}, {"overrides": {"brim_type": "no_brim"}}),
+             ({"brim_width": "0"}, {"overrides": {"brim_width": "0"}}),
+             ({"brim_width": "0"}, {"brim_width": 0})]
+    for settings, kw in asked:
+        sliced = _no_brim_gcode(settings={**SETTINGS, **settings})
+        card, _turns = SC.placed_as_sliced(_card(), sliced)
+        rep = SC.check(sliced, card, **kw)
+        assert rep["ok"] and rep["lined_up"] and not rep["brim_wanted"], (kw, rep)
+        assert rep["brim_lines"] == 0 and not rep["islands"][0]["brim"]
+        # the largest layer is still read and reported, it only does not decide `ok`
+        assert not rep["first_layer_is_largest"] and rep["largest_layer_mm"] > rep["first_layer_mm"]
+
+
+def test_the_same_card_fails_when_a_brim_was_wanted():
+    sliced = _no_brim_gcode()
+    card, _turns = SC.placed_as_sliced(_card(), sliced)
+    rep = SC.check(sliced, card, overrides={"brim_width": "5"})
+    assert rep["brim_wanted"] and not rep["ok"] and not rep["islands"][0]["brim"]
+
+
+def test_a_brim_printed_when_none_was_asked_for_fails():
+    sliced = _no_brim_gcode(brim=True)
+    card, _turns = SC.placed_as_sliced(_card(), sliced)
+    rep = SC.check(sliced, card, overrides={"brim_type": "no_brim"})
+    assert rep["lined_up"] and rep["brim_lines"] > 0 and not rep["ok"], rep

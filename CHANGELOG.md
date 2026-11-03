@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.16.0
+
+- **`slicecheck.check` passes a card printed with no brim.** It asked every island for a brim ring and the first layer to be the largest layer, which holds only when a brim is printed. With `brim_type` `no_brim` in the overrides, or a brim width of 0, an island needs only its first-layer lines, the largest-layer reading is reported but does not decide `ok`, and any brim line in the G-code fails the check. The report has two new keys, `brim_wanted` and `brim_lines` (the number of brim lines on the first layer). With a brim wanted the check is as before.
+- **Fix: a card sliced with a prime tower lines up with its slice again.** The slicer travels to the prime tower and pushes the retracted filament back with no move before it writes the tower's feature tag, so that push carried the card's feature. `toolpath` read it as a dot of the card beside the tower, the card's outline on layer 1 came out wider than the card, no quarter turn matched it, and `lined_up` was false. A push with no move now counts as neither a line nor filament. The filament per layer drops by those pushes too, so `first_layer_mm` and `per_layer_mm` read a little lower than before on any slice with retractions.
+
 ## 0.15.2
 
 - **Fix: `footing.ears` puts each ear at the first layer's own end.** It centred the ears on the centre line of the first layer's bounding rectangle, so on a curved part (an arm lying on its side) an ear could land beside the part and hold nothing. Each ear now sits beyond the farthest point of the first layer along its long axis, reaching `EAR_OVERLAP` under it.
