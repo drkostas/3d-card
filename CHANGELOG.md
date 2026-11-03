@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.2
+
+- **Fix: `card3d.__version__` names the installed release.** It was written by hand beside the version in pyproject.toml, and in 0.17.1 it still said 0.17.0, so `3d-card --version` named the wrong release. `__version__` now reads the version from the installed package's metadata with `importlib.metadata`, so pyproject.toml is the only place the version is written. A source tree that was never installed reads `0+unknown`. An editable install keeps the version it had when it was installed, so run `pip install -e .` again after changing the version. A new test checks that `__version__` matches pyproject.toml.
+
 ## 0.17.1
 
 - **A nested card builds faster, and the card is the same.** A nested build asked for the outline of each part again in every nest try and in every tag pass, and each outline merges thousands of triangles. `footprint` now keeps each outline under a fingerprint of the mesh's vertices, faces and face normals, and gives it back when the same mesh asks again. Only an exact match is reused, so a part moved, turned or edited gets a fresh outline, and the placements, gates, tags and notes are the ones the build gave before. On a nested card of 19 parts, `best_card` took 179 s where it took 388 s and returned the same card, byte for byte. On a 15-part test kit the build projected 69 outlines where it projected 465. `OUTLINE_CACHE` sets how many outlines are kept (0 keeps none) and `clear_outline_cache()` forgets them.
