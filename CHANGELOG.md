@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.17.0
+
+- **Fix: a nested card no longer leaves a part's number beside an identical part when more room would cure it.** When a part's tag found no place nearer it than any other part, the nest was laid again with more room round that part alone. With identical parts (four wheels from one mesh) the nest lays them out alike, so the next try put another wheel in the same crowded place, the tries ran out one wheel at a time, and a wheel's number could end up nearer another wheel than its own. Parts of one shape now get the room together. On a small test kit of six identical wheels the nest settles in 3 tries where it needed 6.
+- `build` returns `crowded_tags`, the parts whose number tag is less than `NEST_TAG_OWN` nearer its own part than any other, or that got no tag. It is measured on the same boxes as `tags`, so it always agrees with `tag_clearance` on the result. A crowded tag can still be left after `NEST_TRIES` nests, and then it is named here and in `notes`.
+- `same_shape(parts)` groups the parts that are the same shape, by volume, surface area and principal moments of inertia, which do not change when a part is moved or turned.
+- `crowded_tags(tags, placed, numbers=None)` gives the parts whose tag breaks the rule, for any card's `tags` and `parts`.
+
 ## 0.16.0
 
 - **`slicecheck.check` passes a card printed with no brim.** It asked every island for a brim ring and the first layer to be the largest layer, which holds only when a brim is printed. With `brim_type` `no_brim` in the overrides, or a brim width of 0, an island needs only its first-layer lines, the largest-layer reading is reported but does not decide `ok`, and any brim line in the G-code fails the check. The report has two new keys, `brim_wanted` and `brim_lines` (the number of brim lines on the first layer). With a brim wanted the check is as before.
