@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.2
+
+- **Fix: `footing.ears` puts each ear at the first layer's own end.** It centred the ears on the centre line of the first layer's bounding rectangle, so on a curved part (an arm lying on its side) an ear could land beside the part and hold nothing. Each ear now sits beyond the farthest point of the first layer along its long axis, reaching `EAR_OVERLAP` under it.
+
 ## 0.15.1
 
 - **Fix: the prime tower is not read as part of the card.** `slicecheck.toolpath` leaves out the extrusion of the `Prime tower` and `Wipe tower` features. On a slice in two colours the tower pulled `placed_as_sliced` off the card, and each colour change purges into it, so a layer with a change read as the largest and `first_layer_is_largest` failed.

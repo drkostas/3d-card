@@ -57,3 +57,20 @@ def test_ears_hold_the_rod_and_leave_its_shape():
     assert 0 < eared.volume - rod.volume <= discs + 1e-6
     for z in (1.0, 2.5):
         assert abs(F._section(eared, z).area - F._section(rod, z).area) < 0.05
+
+
+def test_ears_sit_on_the_ends_of_a_curved_first_layer():
+    import numpy as np
+    import trimesh
+    from shapely.geometry import LineString
+    from card3d import footing
+    # a thin arc lying on the plate, like an arm on its side: its ends are far off the middle line
+    a = np.linspace(-1.0, 1.0, 40)
+    arc = LineString(np.c_[20 * np.sin(a), 20 * (1 - np.cos(a))]).buffer(0.7)
+    m = trimesh.creation.extrude_polygon(arc, 1.5)
+    eared = footing.ears(m)
+    disc_area = np.pi * (footing.EAR_D / 2.0) ** 2
+    first = footing._section(eared, 0.1).area
+    # both discs touch the part, so the first layer gained close to two whole discs, not one
+    assert first > footing._section(m, 0.1).area + 1.6 * disc_area
+    assert len(eared.split(only_watertight=False)) == 1
