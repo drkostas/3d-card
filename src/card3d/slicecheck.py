@@ -11,7 +11,8 @@ card's mesh (`check`, `coverage`):
 - each filament prints on the nozzle you meant (`nozzles_used`),
 - the first layer carries more filament than any other layer, since a card that starts in the air
   lays a few mm on layer 1 and hundreds on layer 4,
-- every island of the card on the plate gets first-layer lines and a brim ring,
+- every island of the card on the plate gets first-layer lines and a brim ring (with no brim asked
+  for, first-layer lines and no brim line anywhere, and the first layer need not be the largest),
 - each piece of the card, cut every few layers, has its walls drawn.
 
 The slicer may move and turn the card on the plate. `placed_as_sliced` finds the quarter turn and
@@ -91,6 +92,11 @@ def toolpath(gcode: str, every: dict | None = None):
     """Per layer: (z, filament mm) and the first layer's extrusion segments with their feature. Pass
     a dict as `every` to have each layer's extrusion segments put in it, keyed by the layer's z.
 
+    Only moves that lay a line count. A push of filament with no move (the slicer's re-prime after
+    a retraction) is left out of both the segments and the filament. It marks no place the card is
+    printed, and the one written at the prime tower before the tower's feature tag would read as a dot
+    of the card beside the tower and widen the card's outline.
+
     The prime tower of a slice in two or more colours is left out (`TOWER_FEATURES`): it is not part
     of the card, so it would pull `placed_as_sliced` off the card, and each colour change purges into
     it, which would make a layer with a change read as the largest."""
@@ -122,7 +128,11 @@ def toolpath(gcode: str, every: dict | None = None):
                     re.fullmatch(r"-?(\d+\.?\d*|\.\d+)", w[1:]))   # Bambu writes .0321, no leading zero
         nx, ny = vals.get("X", x), vals.get("Y", y)
         e = vals.get("E", 0.0)
-        if e > 0 and e_rel and feature not in TOWER_FEATURES:
+        # A push of filament with no move lays no line. The slicer writes one after each travel to
+        # take back the retraction, and the one before the prime tower's feature tag still carries
+        # the card's feature, so read as a line it was a dot of the card where the tower stands.
+        laid = line[:2] in ("G2", "G3") or (nx, ny) != (x, y)
+        if e > 0 and e_rel and laid and feature not in TOWER_FEATURES:
             cur += e
             # Round walls are arcs. The slicer fits arcs (G2 clockwise, G3 counter-clockwise, centre
             # at I, J from the start), and a full circle is one arc that ends where it starts: read as
@@ -450,6 +460,12 @@ def check(sliced: dict, card, overrides=None, bed_type=None, brim_width=None) ->
     G-code's settings block. `bed_type` is the plate's name as the slicer writes it. `brim_width`
     (mm) is how far from an island its brim may run, by default the `brim_width` override or 5.
     Returns a report whose `ok` is true only when every check passed.
+
+    A brim is wanted unless the overrides ask for `brim_type` `no_brim` or the brim width is 0. When
+    it is wanted, every island needs a brim ring and the first layer has to be the largest. When it
+    is not, an island needs only its first-layer lines, the first layer may be smaller than a later
+    one (a card that is wider above its first layer), and no brim line may be printed (`brim_lines`). The largest
+    layer is reported either way.
     """
     overrides = dict(overrides or {})
     gcode = sliced["gcode"]
@@ -461,6 +477,7 @@ def check(sliced: dict, card, overrides=None, bed_type=None, brim_width=None) ->
     per_layer = [mm for _z, mm in layers]
     first_is_largest = bool(bool(per_layer) and per_layer[0] >= max(per_layer))
     brim_w = float(brim_width if brim_width is not None else overrides.get("brim_width", 5))
+    brim_wanted = str(overrides.get("brim_type", "")).strip().strip('"') != "no_brim" and brim_w > 0
 
     from shapely.geometry import LineString, Point
     from shapely.affinity import translate
@@ -496,13 +513,16 @@ def check(sliced: dict, card, overrides=None, bed_type=None, brim_width=None) ->
     pred = re.search(r'key="prediction" value="([\d.]+)"', info)
     weight = re.search(r'key="weight" value="([\d.]+)"', info)
     warnings = re.findall(r'<warning[^>]*msg="([^"]*)"', info)
-    ok = (all(v["ok"] for v in landed.values()) and bed["ok"] and first_is_largest and size_ok
-          and all(i["first_layer_moves"] > 0 and i["brim"] for i in out_islands) and bool(out_islands))
+    brim_ok = first_is_largest if brim_wanted else not brim
+    ok = (all(v["ok"] for v in landed.values()) and bed["ok"] and brim_ok and size_ok
+          and all(i["first_layer_moves"] > 0 and (i["brim"] or not brim_wanted) for i in out_islands)
+          and bool(out_islands))
     return {"ok": bool(ok), "time_s": float(pred.group(1)) if pred else None,
             "grams": float(weight.group(1)) if weight else None, "layers": len(layers),
             "first_layer_mm": round(per_layer[0], 1) if per_layer else None,
             "largest_layer_mm": round(max(per_layer), 1) if per_layer else None,
-            "first_layer_is_largest": first_is_largest, "settings": landed, "bed": bed,
+            "first_layer_is_largest": first_is_largest, "brim_wanted": brim_wanted,
+            "brim_lines": len(brim), "settings": landed, "bed": bed,
             "islands": out_islands, "lined_up": bool(size_ok), "shift_mm": shift, "slicer_warnings": warnings,
             "per_layer_mm": [round(v, 1) for v in per_layer]}
 
