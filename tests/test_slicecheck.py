@@ -300,3 +300,44 @@ def test_a_brim_printed_when_none_was_asked_for_fails():
     card, _turns = SC.placed_as_sliced(_card(), sliced)
     rep = SC.check(sliced, card, overrides={"brim_type": "no_brim"})
     assert rep["lined_up"] and rep["brim_lines"] > 0 and not rep["ok"], rep
+
+
+def _filled(x0, y0, x1, y1, feature="Inner wall", step=0.4):
+    """G-code lines filling a rectangle with lines `step` apart, as one feature."""
+    g = [f"; FEATURE: {feature}"]
+    y = y0
+    while y <= y1 + 1e-9:
+        g += [f"G0 X{x0:.2f} Y{y:.2f}", f"G1 X{x1:.2f} Y{y:.2f} E0.1"]
+        y += step
+    return g
+
+
+def _stack(*layers):
+    g = ["M83"]
+    for i, body in enumerate(layers):
+        g += ["; CHANGE_LAYER", f"; Z_HEIGHT: {0.2 * (i + 1):.1f}"] + body
+    return "\n".join(g) + "\n"
+
+
+def test_in_air_reads_a_side_that_grows_past_the_first_layer():
+    # a 2 mm strip on the plate, then a layer 6 mm wide over it: 4 mm of it has nothing under it
+    g = _stack(_filled(0, 0, 20, 2), _filled(0, -2, 20, 4))
+    r = SC.in_air(g)
+    assert 40 < r["per_layer_mm2"][0] < 90 and r["where"]
+
+
+def test_in_air_reads_nothing_for_a_straight_wall():
+    g = _stack(_filled(0, 0, 20, 6), _filled(0, 0, 20, 6), _filled(0, 0, 20, 6))
+    assert SC.in_air(g)["total_mm2"] < 1.0
+
+
+def test_in_air_leaves_out_bridges_and_the_tower():
+    g = _stack(_filled(0, 0, 4, 4) + _filled(16, 0, 20, 4),
+               _filled(0, 0, 20, 4, feature="Bridge") + _filled(40, 0, 50, 10, feature="Prime tower"))
+    assert SC.in_air(g)["total_mm2"] < 1.0
+
+
+def test_in_air_counts_what_stands_on_a_sheet_one_layer_down_as_held():
+    # the sheet is the first layer, the card's side prints on the third, the second is left empty
+    g = _stack(_filled(0, -3, 20, 5), _filled(0, 0, 20, 2), _filled(0, -2, 20, 4))
+    assert SC.in_air(g)["total_mm2"] < 1.0
