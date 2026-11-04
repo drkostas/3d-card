@@ -88,7 +88,7 @@ def _arc(x, y, nx, ny, i, j, clockwise, step_mm=0.5):
 TOWER_FEATURES = ("Prime tower", "Wipe tower")
 
 
-def toolpath(gcode: str, every: dict | None = None):
+def toolpath(gcode: str, every: dict | None = None, features: dict | None = None):
     """Per layer: (z, filament mm) and the first layer's extrusion segments with their feature. Pass
     a dict as `every` to have each layer's extrusion segments put in it, keyed by the layer's z.
 
@@ -99,7 +99,10 @@ def toolpath(gcode: str, every: dict | None = None):
 
     The prime tower of a slice in two or more colours is left out (`TOWER_FEATURES`): it is not part
     of the card, so it would pull `placed_as_sliced` off the card, and each colour change purges into
-    it, which would make a layer with a change read as the largest."""
+    it, which would make a layer with a change read as the largest.
+
+    Pass a dict as `features` too to have each segment's feature put in it, in the same order as
+    `every`'s segments for that layer."""
     layers, segs = [], []
     x = y = z = 0.0
     e_rel, feature, layer = True, "", 0
@@ -144,10 +147,71 @@ def toolpath(gcode: str, every: dict | None = None):
                     segs.append((a, b, c, d, feature))
                 if every is not None:
                     every.setdefault(round(z, 3), []).append((a, b, c, d))
+                    if features is not None:
+                        features.setdefault(round(z, 3), []).append(feature)
         x, y = nx, ny
     if layer:
         layers.append((z, cur))
     return layers, segs
+
+
+#: features printed in the air on purpose, left out of `in_air`'s count (still read as support)
+BRIDGES = ("Bridge", "Internal Bridge")
+
+
+def in_air(gcode: str, layers: int = 12, line_w: float = 0.42, res: float = 0.2,
+           skip=BRIDGES) -> dict:
+    """How much each of the first `layers` layers prints with nothing under it, read from the G-code.
+
+    Every line is laid on a grid of `res` mm cells, `line_w` wide. A cell of layer k counts as in the
+    air when no line of any layer below it lies within one line width. Bridges are in the air by
+    design and the slicer prints them as such, so they are left out of the count (`skip`). A part
+    lying on its round side shows here: from its second layer its sides grow past its first layer
+    with nothing under them, droop, curl and are caught by the nozzle. Returns `per_layer_mm2` (from
+    layer 2), `total_mm2`, and `where`, the largest patches as (x, y, mm2), largest first."""
+    from scipy import ndimage
+    every, feats = {}, {}
+    toolpath(gcode, every, feats)
+    zs = sorted(every)[:layers]
+    if not zs:
+        return {"per_layer_mm2": [], "total_mm2": 0.0, "where": []}
+    allseg = np.vstack([np.asarray(every[z], float).reshape(-1, 4) for z in zs])
+    lo = np.minimum(allseg[:, :2], allseg[:, 2:]).min(axis=0) - 2.0
+    hi = np.maximum(allseg[:, :2], allseg[:, 2:]).max(axis=0) + 2.0
+    shape = (int((hi[1] - lo[1]) / res) + 1, int((hi[0] - lo[0]) / res) + 1)
+    grow = max(0, int(round(line_w / 2.0 / res)))
+
+    def lay(segs):
+        g = np.zeros(shape, bool)
+        for x0, y0, x1, y1 in segs:
+            n = max(2, int(np.hypot(x1 - x0, y1 - y0) / (res / 2.0)) + 1)
+            xs = ((np.linspace(x0, x1, n) - lo[0]) / res).astype(int)
+            ys = ((np.linspace(y0, y1, n) - lo[1]) / res).astype(int)
+            g[ys, xs] = True
+        return ndimage.binary_dilation(g, iterations=grow) if grow else g
+
+    below = lay(every[zs[0]])
+    per, air_all = [], np.zeros(shape, bool)
+    reach = max(1, int(round(line_w / res)))
+    for z in zs[1:]:
+        segs = every[z]
+        f = feats.get(z, [""] * len(segs))
+        counted = lay([sg for sg, ft in zip(segs, f) if ft not in skip])
+        air = counted & ~ndimage.binary_dilation(below, iterations=reach)
+        per.append(round(float(air.sum()) * res * res, 1))
+        air_all |= air
+        below |= lay(segs)
+    lab, n = ndimage.label(ndimage.binary_dilation(air_all, iterations=reach))
+    where = []
+    for i in range(1, n + 1):
+        cells = (lab == i) & air_all
+        a = float(cells.sum()) * res * res
+        if a >= 1.0:
+            ys, xs = np.nonzero(cells)
+            where.append((round(float(xs.mean() * res + lo[0]), 1), round(float(ys.mean() * res + lo[1]), 1),
+                          round(a, 1)))
+    where.sort(key=lambda w: -w[2])
+    return {"per_layer_mm2": per, "total_mm2": round(float(sum(per)), 1), "where": where[:20]}
 
 
 #: two variants of a test closer than this in every printed size are one variant
@@ -452,7 +516,8 @@ def part_at(placed: dict, x: float, y: float):
     return name, got[name]
 
 
-def check(sliced: dict, card, overrides=None, bed_type=None, brim_width=None) -> dict:
+def check(sliced: dict, card, overrides=None, bed_type=None, brim_width=None,
+          air_max_mm2: float | None = None) -> dict:
     """Read a slice against its card: settings, plate, first layer, islands and brims.
 
     `sliced` is `read_3mf`'s result and `card` the mesh as it lies on the plate in the G-code's
@@ -460,6 +525,9 @@ def check(sliced: dict, card, overrides=None, bed_type=None, brim_width=None) ->
     G-code's settings block. `bed_type` is the plate's name as the slicer writes it. `brim_width`
     (mm) is how far from an island its brim may run, by default the `brim_width` override or 5.
     Returns a report whose `ok` is true only when every check passed.
+
+    `in_air` is always read (see `in_air`). With `air_max_mm2` the slice fails when its first layers
+    print more than that much with nothing under it.
 
     A brim is wanted unless the overrides ask for `brim_type` `no_brim` or the brim width is 0. When
     it is wanted, every island needs a brim ring and the first layer has to be the largest. When it
@@ -514,7 +582,10 @@ def check(sliced: dict, card, overrides=None, bed_type=None, brim_width=None) ->
     weight = re.search(r'key="weight" value="([\d.]+)"', info)
     warnings = re.findall(r'<warning[^>]*msg="([^"]*)"', info)
     brim_ok = first_is_largest if brim_wanted else not brim
-    ok = (all(v["ok"] for v in landed.values()) and bed["ok"] and brim_ok and size_ok
+    air = in_air(gcode)
+    air["max_mm2"] = air_max_mm2
+    air["ok"] = air_max_mm2 is None or air["total_mm2"] <= air_max_mm2
+    ok = (all(v["ok"] for v in landed.values()) and bed["ok"] and brim_ok and size_ok and air["ok"]
           and all(i["first_layer_moves"] > 0 and (i["brim"] or not brim_wanted) for i in out_islands)
           and bool(out_islands))
     return {"ok": bool(ok), "time_s": float(pred.group(1)) if pred else None,
@@ -524,7 +595,7 @@ def check(sliced: dict, card, overrides=None, bed_type=None, brim_width=None) ->
             "first_layer_is_largest": first_is_largest, "brim_wanted": brim_wanted,
             "brim_lines": len(brim), "settings": landed, "bed": bed,
             "islands": out_islands, "lined_up": bool(size_ok), "shift_mm": shift, "slicer_warnings": warnings,
-            "per_layer_mm": [round(v, 1) for v in per_layer]}
+            "per_layer_mm": [round(v, 1) for v in per_layer], "in_air": air}
 
 
 def coverage(card, sliced, shift, line_w=0.42, step=5):
